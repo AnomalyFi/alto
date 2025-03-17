@@ -69,6 +69,8 @@ pub struct Config {
     pub worker_threads: usize,
     pub log_level: String,
 
+    pub metrics_port: u16,
+
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
 

@@ -8,10 +8,10 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     Ed25519, Scheme,
 };
-use commonware_deployer::ec2;
+use commonware_deployer::ec2::{self};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::{collections::BTreeMap, fs, ops::AddAssign};
+use std::{collections::BTreeMap, fs, path::Path, ops::AddAssign};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ const BINARY_NAME: &str = "validator";
 const PORT: u16 = 4545;
 const STORAGE_CLASS: &str = "gp3";
 const DASHBOARD_FILE: &str = "dashboard.json";
+const MONITORING_PORT: u16 = 9000;
 
 fn main() {
     // Initialize logger
@@ -111,6 +112,65 @@ fn main() {
                 ),
         )
         .subcommand(
+            Command::new("generate-local")
+                .about("Generate configuration files for an alto chain locally")
+                .arg(
+                    Arg::new("storage_dir")
+                        .long("storage-dir")
+                        .required(false)
+                        .default_value("/tmp/alto")
+                        .value_parser(value_parser!(String))
+                )
+                .arg(
+                    Arg::new("peers")
+                        .long("peers")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("bootstrappers")
+                        .long("bootstrappers")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("worker_threads")
+                        .long("worker-threads")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("log_level")
+                        .long("log-level")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("message_backlog")
+                        .long("message-backlog")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("mailbox_size")
+                        .long("mailbox-size")
+                        .required(true)
+                        .value_parser(value_parser!(usize)),
+                )
+                .arg(
+                    Arg::new("dashboard")
+                        .long("dashboard")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .required(true)
+                        .value_parser(value_parser!(String)),
+                ),
+        )
+        .subcommand(
             Command::new("indexer")
                 .about("Add indexer support for an alto chain.")
                 .arg(
@@ -155,6 +215,7 @@ fn main() {
     // Handle subcommands
     match matches.subcommand() {
         Some(("generate", sub_matches)) => generate(sub_matches),
+        Some(("generate-local", sub_matches)) => generate_local(sub_matches),
         Some(("indexer", sub_matches)) => indexer(sub_matches),
         Some(("explorer", sub_matches)) => explorer(sub_matches),
         _ => {
@@ -257,6 +318,8 @@ fn generate(sub_matches: &ArgMatches) {
             worker_threads,
             log_level: log_level.clone(),
 
+            metrics_port: 9090,
+
             allowed_peers: allowed_peers.clone(),
             bootstrappers: bootstrappers.clone(),
 
@@ -317,6 +380,161 @@ fn generate(sub_matches: &ArgMatches) {
     serde_yaml::to_writer(file, &config).unwrap();
     info!(path = "config.yaml", "wrote configuration file");
 }
+
+fn generate_local(sub_matches: &ArgMatches) {
+    // Extract arguments
+    let storage_dir = sub_matches.get_one::<String>("storage_dir").unwrap().clone();
+    let peers = *sub_matches.get_one::<usize>("peers").unwrap();
+    let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
+
+    let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
+    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
+    let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
+    let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
+    let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
+    let output = sub_matches.get_one::<String>("output").unwrap().clone();
+
+    // Construct output path
+    let raw_current_dir = std::env::current_dir().unwrap();
+    let current_dir = raw_current_dir.to_str().unwrap();
+    let output = format!("{}/{}", current_dir, output);
+
+    // Check if output directory exists
+    if fs::metadata(&output).is_ok() {
+        error!("output directory already exists: {}", output);
+        std::process::exit(1);
+    }
+
+    // Generate UUID
+    let tag = Uuid::new_v4().to_string();
+    info!(tag, "generated deployment tag");
+
+    // Generate peers
+    assert!(
+        bootstrappers <= peers,
+        "bootstrappers must be less than or equal to peers"
+    );
+    let mut peer_schemes = (0..peers)
+        .map(|_| Ed25519::new(&mut OsRng))
+        .collect::<Vec<_>>();
+    peer_schemes.sort_by_key(|scheme| scheme.public_key());
+    let allowed_peers: Vec<String> = peer_schemes
+        .iter()
+        .map(|scheme| scheme.public_key().to_string())
+        .collect();
+    let bootstrappers = allowed_peers
+        .iter()
+        .choose_multiple(&mut OsRng, bootstrappers)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    // Generate consensus key
+    let peers_u32 = peers as u32;
+    let threshold = quorum(peers_u32).expect("unable to derive quorum");
+    let (identity, shares) = ops::generate_shares(&mut OsRng, None, peers_u32, threshold);
+    info!(
+        identity = hex(&poly::public(&identity).serialize()),
+        "generated network key"
+    );
+
+    // Generate instance configurations
+    let mut peer_configs = Vec::new();
+    let mut instance_configs = Vec::new();
+    let mut peers = Vec::new();
+
+    for (index, scheme) in peer_schemes.iter().enumerate() {
+        // Create peer config
+        let name = format!("validator{}", index);
+        let peer_config_file = format!("{}.yaml", name);
+
+        let peer_directory = Path::new(&storage_dir).join(format!("validator{}", index));
+        let peer_config = Config { private_key: scheme.private_key().to_string(),
+            share: hex(&shares[index].serialize()),
+            identity: hex(&identity.serialize()),
+
+            port: PORT + index as u16,
+            directory: peer_directory.to_string_lossy().into_owned(),
+            worker_threads,
+            log_level: log_level.clone(),
+
+            metrics_port: 9090 + index as u16,
+
+            allowed_peers: allowed_peers.clone(),
+            bootstrappers: bootstrappers.clone(),
+
+            message_backlog,
+            mailbox_size,
+
+            indexer: None,
+        };
+        peer_configs.push((peer_config_file.clone(), peer_config));
+
+        // Create instance config
+        let region = "local".to_string();
+        let instance = ec2::InstanceConfig {
+            name: scheme.public_key().to_string(),
+            region,
+            instance_type: "local".to_string(),
+            storage_size: 10,
+            storage_class: "local".to_string(),
+            binary: BINARY_NAME.to_string(),
+            config: peer_config_file,
+        };
+        instance_configs.push(instance);
+
+        // Create peer config
+        let peer = ec2::Peer {
+            name: scheme.public_key().to_string(),
+            region: "local".to_string(),
+            ip: "127.0.0.1".parse().expect("invalid IP address"),
+            port: PORT + index as u16,
+        };
+        peers.push(peer);
+    }
+
+    // Generate root config file
+    let config = ec2::Config {
+        tag,
+        instances: instance_configs,
+        monitoring: ec2::MonitoringConfig {
+            instance_type: "local".to_string(),
+            storage_size: 10,
+            storage_class: "local".to_string(),
+            dashboard: "dashboard.json".to_string(),
+        },
+        ports: vec![ec2::PortConfig {
+            protocol: "tcp".to_string(),
+            port: MONITORING_PORT,
+            cidr: "0.0.0.0/0".to_string(),
+        }],
+    };
+
+    // Write configuration files
+    fs::create_dir_all(&output).unwrap();
+    fs::copy(
+        format!("{}/{}", current_dir, dashboard),
+        format!("{}/dashboard.json", output),
+    )
+    .unwrap();
+    for (peer_config_file, peer_config) in peer_configs {
+        let path = format!("{}/{}", output, peer_config_file);
+        let file = fs::File::create(&path).unwrap();
+        serde_yaml::to_writer(file, &peer_config).unwrap();
+        info!(path = peer_config_file, "wrote peer configuration file");
+    }
+
+    let path = format!("{}/config.yaml", output);
+    let file = fs::File::create(&path).unwrap();
+    serde_yaml::to_writer(file, &config).unwrap();
+    info!(path = "config.yaml", "wrote configuration file");
+
+    let peers_path = format!("{}/peers.yaml", output);
+    let file = fs::File::create(peers_path).unwrap();
+    serde_yaml::to_writer(file, &ec2::Peers{peers}).unwrap();
+    info!(path = "peers.yaml", "wrote peers configuration file");
+}
+
 
 fn indexer(sub_matches: &ArgMatches) {
     // Extract arguments

@@ -17,7 +17,7 @@ use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use futures::future::try_join_all;
 use governor::Quota;
-use prometheus_client::metrics::gauge::Gauge;
+use prometheus_client::metrics::{self, gauge::Gauge};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -62,6 +62,11 @@ fn parse_log_level(level: &str) -> Option<Level> {
 }
 
 fn main() {
+    struct PeerAddr {
+        ip: IpAddr,
+        port: u16
+    }
+
     // Parse arguments
     let matches = Command::new("validator")
         .about("Validator for an alto chain.")
@@ -73,13 +78,16 @@ fn main() {
     let peer_file = matches.get_one::<String>("peers").unwrap();
     let peers_file = std::fs::read_to_string(peer_file).expect("Could not read peers file");
     let peers: Peers = serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
-    let peers: HashMap<PublicKey, IpAddr> = peers
+    let peers: HashMap<PublicKey, PeerAddr> = peers
         .peers
         .into_iter()
         .map(|peer| {
             let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
             let key = PublicKey::try_from(key).expect("Peer key is invalid");
-            (key, peer.ip)
+            (key, PeerAddr {
+                ip: peer.ip,
+                port: peer.port
+            })
         })
         .collect();
     info!(peers = peers.len(), "loaded peers");
@@ -99,7 +107,8 @@ fn main() {
     let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
     let identity_public = *poly::public(&identity);
     let public_key = signer.public_key();
-    let ip = peers.get(&public_key).expect("Could not find self in IPs");
+    let metrics_port = config.metrics_port;
+    let ip = peers.get(&public_key).expect("Could not find self in IPs").ip;
     info!(
         ?public_key,
         identity = hex(&identity_public.serialize()),
@@ -123,8 +132,8 @@ fn main() {
     for bootstrapper in &config.bootstrappers {
         let key = from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
         let key = PublicKey::try_from(key).expect("Bootstrapper key is invalid");
-        let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
-        let bootstrapper_socket = format!("{}:{}", ip, config.port);
+        let peer_addr = peers.get(&key).expect("Could not find bootstrapper in IPs");
+        let bootstrapper_socket = format!("{}:{}", peer_addr.ip, peer_addr.port);
         let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
             .expect("Could not parse bootstrapper socket");
         bootstrappers.push((key, bootstrapper_socket));
@@ -144,7 +153,7 @@ fn main() {
         signer.clone(),
         P2P_NAMESPACE,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-        SocketAddr::new(*ip, config.port),
+        SocketAddr::new(ip, config.port),
         bootstrappers,
         MAX_MESSAGE_SIZE,
     );
@@ -278,8 +287,8 @@ fn main() {
         });
 
         // Serve metrics
-        let metrics = context.with_label("metrics").spawn(|context| async move {
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), METRICS_PORT);
+        let metrics = context.with_label("metrics").spawn(move |context| async move {
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), metrics_port);
             let listener = context
                 .bind(addr)
                 .await
