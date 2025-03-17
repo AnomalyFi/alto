@@ -1,15 +1,14 @@
-use alto_chain::{engine, Config};
+use alto_chain::{actors::mempool, engine, Config};
 use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
+use commonware_broadcast::linked;
 use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
         poly,
-    },
-    ed25519::{PrivateKey, PublicKey},
-    Ed25519, Scheme,
+    }, ed25519::{PrivateKey, PublicKey}, sha256, Bls12381, Ed25519, Scheme
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
@@ -208,6 +207,28 @@ fn main() {
             indexer = Some(Client::new(&uri, identity_public.into()));
         }
 
+        // Create mempool/broadcast/Proof of Availability engine
+        let mempool_namespace = b"mempool";
+        let (mempool_application, mempool_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
+        let broadcast_coordinator = mempool::coordinator::Coordinator::new(identity.clone(), peer_keys.clone(), share);
+        let (broadcast_collector, collector_mailbox) = mempool::collector::Collector::<Ed25519, sha256::Digest>::new(mempool_namespace, identity_public);
+        let broadcast_engine = linked::Engine::new(context.with_label("broadcast_engine"), linked::Config { 
+            crypto:  signer, 
+            coordinator: broadcast_coordinator, 
+            application: mempool_mailbox, 
+            collector: collector_mailbox, 
+            mailbox_size: 1024, 
+            verify_concurrent: 1024,
+            namespace: mempool_namespace.to_vec(), 
+            refresh_epoch_timeout: Duration::from_millis(100), 
+            rebroadcast_timeout: Duration::from_secs(5),
+            epoch_bounds: (1,1), 
+            height_bound: 2, 
+            journal_name_prefix: format!("broadcast-linked-seq/{}/", public_key),
+            journal_heights_per_section: 10, 
+            journal_replay_concurrency: 1 
+        });
+
         // Create engine
         let config = engine::Config {
             partition_prefix: "engine".to_string(),
@@ -229,6 +250,7 @@ fn main() {
             fetch_rate_per_peer: resolver_limit,
             indexer,
         };
+
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
