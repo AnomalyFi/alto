@@ -2,13 +2,16 @@ pub mod actor;
 pub mod ingress;
 pub mod coordinator;
 pub mod collector;
+pub mod mempool;
 
 #[cfg(test)]
 mod tests {
+    use core::{num, panic};
     use std::{collections::{BTreeMap, HashMap}, hash::Hash, sync::{Arc, Mutex}, time::Duration};
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
-    use tracing::debug;
+    use commonware_storage::mmr::mem;
+    use tracing::{debug, warn};
 
     use commonware_cryptography::{bls12381::{self, dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Hasher, Scheme};
     use commonware_macros::test_traced;
@@ -16,9 +19,9 @@ mod tests {
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
     use futures::{channel::oneshot, future::join_all};
 
-    use super::collector;
+    use super::{collector, mempool::{self, Mempool, RawTransaction}};
 
-    type Registrations<P> = HashMap<P, ((Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>))>;
+    type Registrations<P> = HashMap<P, ((Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>))>;
 
     #[allow(dead_code)]
     enum Action {
@@ -33,14 +36,17 @@ mod tests {
     ) -> HashMap<PublicKey, (
         (Sender<PublicKey>, Receiver<PublicKey>),
         (Sender<PublicKey>, Receiver<PublicKey>),
+        (Sender<PublicKey>, Receiver<PublicKey>),
     )> { 
         let mut registrations = HashMap::new();        
         for validator in validators.iter() {
-            let (chunk_sender, chunk_receiver) = oracle.register(validator.clone(), 4).await.unwrap();
+            let (digest_sender, digest_receiver) = oracle.register(validator.clone(), 4).await.unwrap();
             let (ack_sender, ack_receiver) = oracle.register(validator.clone(), 5).await.unwrap();
+            let (chunk_sender, chunk_receiver) = oracle.register(validator.clone(), 6).await.unwrap();
             registrations.insert(validator.clone(), (
-                (chunk_sender, chunk_receiver),
+                (digest_sender, digest_receiver),
                 (ack_sender, ack_receiver),
+                (chunk_sender, chunk_receiver),
             ));
         }
         registrations
@@ -242,9 +248,68 @@ mod tests {
             );
 
             context.with_label("app").spawn(|_| app.run(mailbox));
-            let ((a1, a2), (b1, b2)) = registrations.remove(validator).unwrap();
+            let ((a1, a2), (b1, b2), (_, _)) = registrations.remove(validator).unwrap();
             engine.start((a1, a2), (b1, b2));
         }
+    }
+
+    fn spawn_mempools(
+        context: Context,
+        validators: &[(PublicKey, Ed25519, Share)],
+        registrations: &mut Registrations<PublicKey>,
+        mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox>,
+    ) {
+        for (validator, _, _) in validators.iter() {
+            let (mempool, mailbox) = Mempool::new(
+                context.with_label("mempool"), 
+                mempool::Config {
+                    batch_propose_interval: Duration::from_millis(500),
+                    batch_size_limit: 1024*1024, // 1MB
+                }
+            );
+            mailboxes.insert(validator.clone(), mailbox);
+            let ((_, _), (_, _), (c1, c2)) = registrations.remove(validator).unwrap();
+            mempool.start((c1, c2));
+        }
+    }
+
+    fn spawn_tx_issuer_and_wait(
+        context: Context,
+        mailboxes: Arc<Mutex<BTreeMap<PublicKey, mempool::Mailbox>>>,
+        num_txs: u32,
+    ) {
+        context
+            .clone()
+            .with_label("tx issuer")
+            .spawn(move |context| async move {
+                let mut mailbox_vec: Vec<mempool::Mailbox> = {
+                    let guard = mailboxes.lock().unwrap();
+                    guard.values().cloned().collect()
+                };
+
+                let Some(mut mailbox)= mailbox_vec.pop() else {
+                    panic!("no single mailbox provided");
+                };
+
+                
+                // issue tx to the first validator
+                let mut digests = Vec::new();
+                for i in 1..num_txs {
+                    let tx = RawTransaction::new(Bytes::from(format!("tx-{}", i)));
+                    let submission_res = mailbox.issue_tx(tx.clone()).await;
+                    if !submission_res {
+                        warn!(?tx.digest, "failed to submit tx");
+                    }
+                    digests.push(tx.digest);
+                }
+
+                // check if the tx appear in other validators
+                for mut mailbox in mailbox_vec {
+                    for digest in digests.iter() {
+
+                    }
+                }
+            });
     }
 
     #[test_traced]
@@ -278,6 +343,22 @@ mod tests {
             );
             spawn_proposer(context.with_label("proposer"), mailboxes.clone(), |_| false);
             await_collectors(context.with_label("collector"), &collectors, 100).await;
+        });
+    }
+
+    #[test_traced]
+    fn test_mempool_p2p() {
+        let num_validators: u32 = 4;
+        let quorum: u32 = 3;
+        let (runner, mut context, _) = Executor::timed(Duration::from_secs(30));
+        let (_, mut shares_vec) = dkg::ops::generate_shares(&mut context, None, num_validators, quorum);        
+        shares_vec.sort_by(|a, b| a.index.cmp(&b.index));
+
+        runner.start(async move {
+            let (_oracle, validators, pks, mut registrations ) = initialize_simulation(
+                context.with_label("simulation"), 
+                num_validators, 
+                &mut shares_vec).await;
         });
     }
 }

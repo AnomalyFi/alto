@@ -21,6 +21,7 @@ impl<D: Digest, P: Array> Actor<D, P> {
     }
 
     pub async fn run(mut self, mut engine: impl Broadcaster<Digest = D>) {
+        // it passes msgs in the mailbox of the actor to the engine mailbox
         while let Some(msg) = self.mailbox.next().await {
             match msg {
                 Message::Broadcast(payload) => {
