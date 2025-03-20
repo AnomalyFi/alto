@@ -131,8 +131,9 @@ impl<D: Digest> RawTransaction<D>
 
 pub enum Message<D: Digest> {
     // mark batch as accepted by the netowrk through the broadcast protocol
-    BatchAccepted {
+    BatchAcknowledged {
         digest: D,
+        response: oneshot::Sender<bool>
     },
     // from rpc or websocket
     SubmitTx {
@@ -147,6 +148,10 @@ pub enum Message<D: Digest> {
         digest: D,
         response: oneshot::Sender<Option<Batch<D>>>
     },
+    GetBatchContainTx {
+        digest: D,
+        response: oneshot::Sender<Option<Batch<D>>>
+    }
 }
 
 #[derive(Clone)]
@@ -159,6 +164,16 @@ impl<D: Digest> Mailbox<D> {
         Self {
             sender
         }
+    }
+
+    pub async fn acknowledge_batch(&mut self, digest: D) -> bool {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::BatchAcknowledged { digest, response})
+            .await
+            .expect("failed to acknowledge batch");
+
+        receiver.await.expect("failed to receive batch acknowledge")
     }
 
     pub async fn issue_tx(&mut self, tx: RawTransaction<D>) -> bool {
@@ -185,6 +200,16 @@ impl<D: Digest> Mailbox<D> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatch { digest, response })
+            .await
+            .expect("failed to get batch");
+
+        receiver.await.expect("failed to receive batch")
+    }
+
+    pub async fn get_batch_contain_tx(&mut self, digest: D) -> Option<Batch<D>> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::GetBatchContainTx { digest, response })
             .await
             .expect("failed to get batch");
 
@@ -259,14 +284,27 @@ impl<R: Clock + Spawner, D: Digest> Mempool<R, D>
                             self.txs.push(payload);
                             let _ = response.send(true);
                         },
-                        Message::BatchAccepted { digest } => {
+                        Message::BatchAcknowledged { digest, response } => {
                             if let Some(batch) = self.batches.get_mut(&digest) {
                                 batch.accepted = true;
+                                let _ = response.send(true);
+                                debug!("batch accepted by the network: {}", digest);
+                            } else {
+                                let _ = response.send(false);
                             }
                         },
                         Message::GetBatch { digest, response } => { 
                             let batch = self.batches.get(&digest).cloned();
                             let _ = response.send(batch);
+                        },
+                        Message::GetBatchContainTx { digest, response } => {
+                            // TODO: optimize this naive way of seaching
+                            let pair = self.batches.iter().find(|(_, batch)| batch.contain_tx(&digest));
+                            if let Some((_, batch)) = pair {
+                                let _ = response.send(Some(batch.clone()));
+                            } else {
+                                let _ = response.send(None);
+                            }
                         },
                         Message::GetTx { digest, response } => {
                             // TODO: optimize this naive way of seaching

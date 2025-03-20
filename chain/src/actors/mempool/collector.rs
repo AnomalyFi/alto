@@ -10,6 +10,8 @@ use std::{
 };
 use tracing::error;
 
+use super::mempool;
+
 enum Message<C: Scheme, D: Digest> {
     Acknowledged(Proof, D),
     GetTip(C::PublicKey, oneshot::Sender<Option<u64>>),
@@ -52,7 +54,7 @@ impl<C: Scheme, D: Digest> Collector<C, D> {
         )
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self, mut mempool: mempool::Mailbox<D>) {
         while let Some(msg) = self.mailbox.next().await {
             match msg {
                 Message::Acknowledged(proof, payload) => {
@@ -66,6 +68,12 @@ impl<C: Scheme, D: Digest> Collector<C, D> {
                             continue;
                         }
                     };
+
+                    // Acknowledge batch in mempool, mark the batch as ready for pickup
+                    let acknowledge = mempool.acknowledge_batch(payload).await;
+                    if !acknowledge {
+                        error!("unable to acknowledge batch {}", payload)
+                    }
 
                     // Update the collector
                     let digests = self.digests.entry(context.sequencer.clone()).or_default();

@@ -6,7 +6,7 @@ use futures::{
     channel::mpsc,
     StreamExt,
 };
-use tracing::{error, warn};
+use tracing::{error, warn, debug};
 
 
 pub struct Actor<D: Digest, P: Array> {
@@ -28,6 +28,7 @@ impl<D: Digest, P: Array> Actor<D, P> {
         while let Some(msg) = self.mailbox.next().await {
             match msg {
                 Message::Broadcast(payload) => {
+                    debug!("broadcasting batch {}", payload);
                     let receiver = engine.broadcast(payload).await;
                     let result = receiver.await;
                     match result {
@@ -41,12 +42,13 @@ impl<D: Digest, P: Array> Actor<D, P> {
                     }
                 }
                 Message::Verify(_context, _payload, sender) => {
-                    // TODO: add handler here to process batch received
+                    // TODO: backfill inplace?
                     let Some(_) = mempool.get_batch(_payload).await else {
                         warn!(?_payload, "batch not exists");
                         let _ = sender.send(false);
                         continue;
                     };
+                    debug!("issue verfication to batch {}", _payload);
                     let result = sender.send(true);
                     if result.is_err() {
                         error!("verify dropped");
