@@ -1,4 +1,4 @@
-use super:: ingress::{Mailbox, Message};
+use super::{ ingress::{Mailbox, Message}, mempool};
 use commonware_broadcast::Broadcaster;
 use commonware_cryptography::Digest;
 use commonware_utils::Array;
@@ -20,7 +20,10 @@ impl<D: Digest, P: Array> Actor<D, P> {
         (Actor { mailbox: receiver }, Mailbox::new(sender))
     }
 
-    pub async fn run(mut self, mut engine: impl Broadcaster<Digest = D>) {
+    pub async fn run(mut self, 
+        mut engine: impl Broadcaster<Digest = D>,
+        mut mempool: mempool::Mailbox,
+    ) {
         // it passes msgs in the mailbox of the actor to the engine mailbox
         while let Some(msg) = self.mailbox.next().await {
             match msg {
@@ -39,6 +42,7 @@ impl<D: Digest, P: Array> Actor<D, P> {
                 }
                 Message::Verify(_context, _payload, sender) => {
                     // TODO: add handler here to process batch received
+                    mempool.get_batch(_payload);
                     let result = sender.send(true);
                     if result.is_err() {
                         error!("verify dropped");

@@ -139,6 +139,10 @@ pub enum Message {
         digest: Digest,
         response: oneshot::Sender<Option<RawTransaction>>
     },
+    GetBatch {
+        digest: Digest,
+        response: oneshot::Sender<Option<Batch>>
+    },
 }
 
 #[derive(Clone)]
@@ -171,6 +175,16 @@ impl Mailbox {
             .expect("failed to get tx");
 
         receiver.await.expect("failed to receive tx")
+    }
+
+    pub async fn get_batch(&mut self, digest: Digest) -> Option<Batch> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .send(Message::GetBatch { digest, response })
+            .await
+            .expect("failed to get batch");
+
+        receiver.await.expect("failed to receive batch")
     }
 }
 
@@ -243,6 +257,10 @@ impl<R: Clock + Spawner> Mempool<R> {
                             if let Some(batch) = self.batches.get_mut(&digest) {
                                 batch.accepted = true;
                             }
+                        },
+                        Message::GetBatch { digest, response } => { 
+                            let batch = self.batches.get(&digest).cloned();
+                            let _ = response.send(batch);
                         },
                         Message::GetTx { digest, response } => {
                             // TODO: optimize this naive way of seaching
