@@ -1,8 +1,7 @@
-use std::{alloc::System, collections::HashMap, time::{Duration, SystemTime}};
+use std::{collections::HashMap, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
-use clap::error::ContextKind;
-use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{ed25519::PublicKey, sha256::{self}, Digest, Hasher, Sha256};
 use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Clock, Handle, Spawner};
 use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
@@ -10,18 +9,21 @@ use commonware_macros::select;
 use tracing::{debug, warn};
 
 #[derive(Clone)]
-pub struct Batch  {
-    pub txs: Vec<RawTransaction>,
+pub struct Batch<D: Digest>  {
+    pub txs: Vec<RawTransaction<D>>,
 
-    pub digest: Digest,
+    pub digest: D,
     // mark if the batch is accepted by the network, i.e. the network has received & verified the batch 
     pub accepted: bool, 
     pub timestamp: SystemTime,
 }
 
-impl Batch {
-    fn compute_digest(txs: &Vec<RawTransaction>) -> Digest {
+impl<D: Digest> Batch<D> 
+    where Sha256: Hasher<Digest = D>
+{
+    fn compute_digest(txs: &Vec<RawTransaction<D>>) -> D {
         let mut hasher = Sha256::new();
+
         for tx in txs.into_iter() {
             hasher.update(tx.raw.as_ref());
         }
@@ -29,7 +31,7 @@ impl Batch {
         hasher.finalize()
     }
 
-    pub fn new(txs: Vec<RawTransaction>, timestamp: SystemTime) -> Self {
+    pub fn new(txs: Vec<RawTransaction<D>>, timestamp: SystemTime) -> Self {
         let digest = Self::compute_digest(&txs);
 
         Self {
@@ -84,24 +86,26 @@ impl Batch {
         })
     }
 
-    pub fn contain_tx(&self, digest: &Digest) -> bool {
+    pub fn contain_tx(&self, digest: &D) -> bool {
         self.txs.iter().any(|tx| &tx.digest == digest) 
     }
 
-    pub fn tx(&self, digest: &Digest) -> Option<RawTransaction> {
+    pub fn tx(&self, digest: &D) -> Option<RawTransaction<D>> {
         self.txs.iter().find(|tx| &tx.digest == digest).cloned()
     }
 }
 
 #[derive(Clone)]
-pub struct RawTransaction {
+pub struct RawTransaction<D: Digest> {
     pub raw: Bytes,
 
-    pub digest: Digest
+    pub digest: D
 }
 
-impl RawTransaction {
-    fn compute_digest(raw: &Bytes) -> Digest {
+impl<D: Digest> RawTransaction<D> 
+    where Sha256: Hasher<Digest = D>
+{
+    fn compute_digest(raw: &Bytes) -> D {
         let mut hasher = Sha256::new();
         hasher.update(&raw);
         hasher.finalize()
@@ -125,39 +129,39 @@ impl RawTransaction {
     }
 }
 
-pub enum Message {
+pub enum Message<D: Digest> {
     // mark batch as accepted by the netowrk through the broadcast protocol
     BatchAccepted {
-        digest: Digest,
+        digest: D,
     },
     // from rpc or websocket
     SubmitTx {
-        payload: RawTransaction,
+        payload: RawTransaction<D>,
         response: oneshot::Sender<bool>
     },
     GetTx {
-        digest: Digest,
-        response: oneshot::Sender<Option<RawTransaction>>
+        digest: D,
+        response: oneshot::Sender<Option<RawTransaction<D>>>
     },
     GetBatch {
-        digest: Digest,
-        response: oneshot::Sender<Option<Batch>>
+        digest: D,
+        response: oneshot::Sender<Option<Batch<D>>>
     },
 }
 
 #[derive(Clone)]
-pub struct Mailbox {
-    sender: mpsc::Sender<Message>
+pub struct Mailbox<D: Digest> {
+    sender: mpsc::Sender<Message<D>>
 }
 
-impl Mailbox {
-    pub fn new(sender: mpsc::Sender<Message>) -> Self {
+impl<D: Digest> Mailbox<D> {
+    pub fn new(sender: mpsc::Sender<Message<D>>) -> Self {
         Self {
             sender
         }
     }
 
-    pub async fn issue_tx(&mut self, tx: RawTransaction) -> bool {
+    pub async fn issue_tx(&mut self, tx: RawTransaction<D>) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::SubmitTx { payload: tx, response })
@@ -167,7 +171,7 @@ impl Mailbox {
         receiver.await.expect("failed to receive tx issue status")
     }
 
-    pub async fn get_tx(&mut self, digest: Digest) -> Option<RawTransaction> {
+    pub async fn get_tx(&mut self, digest: D) -> Option<RawTransaction<D>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetTx { digest, response })
@@ -177,7 +181,7 @@ impl Mailbox {
         receiver.await.expect("failed to receive tx")
     }
 
-    pub async fn get_batch(&mut self, digest: Digest) -> Option<Batch> {
+    pub async fn get_batch(&mut self, digest: D) -> Option<Batch<D>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatch { digest, response })
@@ -193,18 +197,20 @@ pub struct Config {
     pub batch_size_limit: u64,
 }
 
-pub struct Mempool<R: Clock + Spawner> {
+pub struct Mempool<R: Clock + Spawner, D: Digest> {
     cfg: Config,
     context: R,
 
-    batches: HashMap<Digest, Batch>,
-    txs: Vec<RawTransaction>,
+    batches: HashMap<D, Batch<D>>,
+    txs: Vec<RawTransaction<D>>,
 
-    mailbox: mpsc::Receiver<Message>,
+    mailbox: mpsc::Receiver<Message<D>>,
 }
 
-impl<R: Clock + Spawner> Mempool<R> {
-    pub fn new(context: R, cfg: Config) -> (Self, Mailbox) {
+impl<R: Clock + Spawner, D: Digest> Mempool<R, D> 
+    where Sha256: Hasher<Digest = D>,
+{
+    pub fn new(context: R, cfg: Config) -> (Self, Mailbox<D>) {
         let (sender, receiver) = mpsc::channel(1024);
         (Self {
             cfg, 

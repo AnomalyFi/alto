@@ -1,4 +1,4 @@
-use super::{ ingress::{Mailbox, Message}, mempool};
+use super::{ ingress::{Mailbox, Message}, mempool::{self, Batch}};
 use commonware_broadcast::Broadcaster;
 use commonware_cryptography::Digest;
 use commonware_utils::Array;
@@ -6,7 +6,7 @@ use futures::{
     channel::mpsc,
     StreamExt,
 };
-use tracing::error;
+use tracing::{error, warn};
 
 
 pub struct Actor<D: Digest, P: Array> {
@@ -22,7 +22,7 @@ impl<D: Digest, P: Array> Actor<D, P> {
 
     pub async fn run(mut self, 
         mut engine: impl Broadcaster<Digest = D>,
-        mut mempool: mempool::Mailbox,
+        mut mempool: mempool::Mailbox<D>
     ) {
         // it passes msgs in the mailbox of the actor to the engine mailbox
         while let Some(msg) = self.mailbox.next().await {
@@ -42,7 +42,11 @@ impl<D: Digest, P: Array> Actor<D, P> {
                 }
                 Message::Verify(_context, _payload, sender) => {
                     // TODO: add handler here to process batch received
-                    mempool.get_batch(_payload);
+                    let Some(_) = mempool.get_batch(_payload).await else {
+                        warn!(?_payload, "batch not exists");
+                        let _ = sender.send(false);
+                        continue;
+                    };
                     let result = sender.send(true);
                     if result.is_err() {
                         error!("verify dropped");
