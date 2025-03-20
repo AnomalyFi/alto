@@ -11,6 +11,7 @@ mod tests {
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
     
+    use prometheus_client::metrics::info;
     use tracing::{debug, info, warn};
 
     use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Hasher, Scheme};
@@ -273,7 +274,7 @@ mod tests {
         }
     }
 
-    fn spawn_tx_issuer_and_wait(
+    async fn spawn_tx_issuer_and_wait(
         context: Context,
         mailboxes: Arc<Mutex<BTreeMap<PublicKey, mempool::Mailbox>>>,
         num_txs: u32,
@@ -325,7 +326,7 @@ mod tests {
                         info!("tx found at mempool: {}", tx.digest);
                     }
                 }
-            });
+            }).await.unwrap();
     }
 
     #[test_traced]
@@ -366,9 +367,11 @@ mod tests {
     fn test_mempool_p2p() {
         let num_validators: u32 = 4;
         let quorum: u32 = 3;
-        let (runner, mut context, _) = Executor::timed(Duration::from_secs(30));
+        let (runner, mut context, auditor) = Executor::timed(Duration::from_secs(30));
         let (_, mut shares_vec) = dkg::ops::generate_shares(&mut context, None, num_validators, quorum);        
         shares_vec.sort_by(|a, b| a.index.cmp(&b.index));
+
+        info!("mempool p2p test started");
 
         runner.start(async move {
             let (_oracle, validators, _, mut registrations ) = initialize_simulation(
@@ -380,7 +383,10 @@ mod tests {
                 mempool::Mailbox,
             >::new()));
             spawn_mempools(context.with_label("mempool"), &validators, &mut registrations, &mut mailboxes.lock().unwrap());
-            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1);
+            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1).await;
+
+            debug!("checking mempool states");
+            auditor.state()
         });
     }
 }

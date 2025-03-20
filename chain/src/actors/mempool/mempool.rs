@@ -1,12 +1,12 @@
-use std::{collections::HashMap, time::{Duration, SystemTime}};
+use std::{alloc::System, collections::HashMap, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
+use clap::error::ContextKind;
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Hasher, Sha256};
 use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Clock, Handle, Spawner};
 use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
 use commonware_macros::select;
-use tokio::time;
 use tracing::{debug, warn};
 
 #[derive(Clone)]
@@ -186,7 +186,7 @@ pub struct Mempool<R: Clock + Spawner> {
     batches: HashMap<Digest, Batch>,
     txs: Vec<RawTransaction>,
 
-    mailbox: mpsc::Receiver<Message>
+    mailbox: mpsc::Receiver<Message>,
 }
 
 impl<R: Clock + Spawner> Mempool<R> {
@@ -219,11 +219,16 @@ impl<R: Clock + Spawner> Mempool<R> {
         ), 
     ) {
 
-        let mut batch_propose_interval = time::interval(self.cfg.batch_propose_interval);
+        let mut propose_timeout = self.context.current() + self.cfg.batch_propose_interval;
         loop {
             select! {
                 mailbox_message = self.mailbox.next() => {
-                    let message = mailbox_message.expect("Mailbox closed");
+                    // let message = mailbox_message.expect("Mailbox closed");
+                    let Some(message) = mailbox_message else {
+                        // TODO: revisit this branch, it was .expect("Mailbox closed") and will panic after unit test is finished
+                        debug!("Mailbox closed, terminating...");
+                        return;
+                    };
                     match message {
                         Message::SubmitTx { payload, response } => {
                             if !payload.validate() {
@@ -250,7 +255,7 @@ impl<R: Clock + Spawner> Mempool<R> {
                         },
                     }
                 },
-                _ = batch_propose_interval.tick() => {
+                _ = self.context.sleep_until(propose_timeout) => {
                     let mut size = 0;
                     let mut txs_cnt = 0;
                     for tx in self.txs.iter() {
@@ -262,9 +267,17 @@ impl<R: Clock + Spawner> Mempool<R> {
                         }
                     }
 
+                    if txs_cnt == 0 {
+                        propose_timeout = self.context.current() + self.cfg.batch_propose_interval;
+                        continue;
+                    }
+
                     let batch = Batch::new(self.txs.drain(..txs_cnt).collect(), self.context.current());
                     self.batches.insert(batch.digest, batch.clone());
                     batch_network.0.send(Recipients::All, batch.serialize().into(), true).await.expect("failed to broadcast batch");
+
+                    // reset the timeout
+                    propose_timeout = self.context.current() + self.cfg.batch_propose_interval;
                 },
                 batch_message = batch_network.1.recv() => {
                     let (sender, message) = batch_message.expect("Batch broadcast closed");
