@@ -1,6 +1,6 @@
-use commonware_utils::{Array, SizedSerialize};
+use commonware_utils::Array;
 use commonware_cryptography::Digest;
-use commonware_broadcast::{linked::Context, Application as A, Broadcaster};
+use commonware_broadcast::{linked::Context, Application as A};
 use futures::{ channel::{mpsc, oneshot}, SinkExt};
 
 pub struct Payload {

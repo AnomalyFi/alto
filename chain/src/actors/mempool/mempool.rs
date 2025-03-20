@@ -1,13 +1,12 @@
-use core::num;
 use std::{collections::HashMap, time::{Duration, SystemTime}};
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use commonware_cryptography::{ed25519::PublicKey, sha256::Digest, Hasher, Sha256};
 use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Clock, Handle, Spawner};
 use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
 use commonware_macros::select;
-use tokio::{io::AsyncReadExt, time};
+use tokio::time;
 use tracing::{debug, warn};
 
 #[derive(Clone)]
@@ -157,7 +156,7 @@ impl Mailbox {
     pub async fn issue_tx(&mut self, tx: RawTransaction) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
-            .send(Message::SubmitTx { payload: tx, response: response })
+            .send(Message::SubmitTx { payload: tx, response })
             .await
             .expect("failed to issue tx");
 
@@ -167,7 +166,7 @@ impl Mailbox {
     pub async fn get_tx(&mut self, digest: Digest) -> Option<RawTransaction> {
         let (response, receiver) = oneshot::channel();
         self.sender
-            .send(Message::GetTx { digest: digest, response: response })
+            .send(Message::GetTx { digest, response })
             .await
             .expect("failed to get tx");
 

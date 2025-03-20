@@ -6,14 +6,14 @@ pub mod mempool;
 
 #[cfg(test)]
 mod tests {
-    use core::{num, panic};
-    use std::{collections::{BTreeMap, HashMap}, hash::Hash, sync::{Arc, Mutex}, time::Duration};
+    use core::panic;
+    use std::{collections::{BTreeMap, HashMap}, sync::{Arc, Mutex}, time::Duration};
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
-    use commonware_storage::mmr::mem;
-    use tracing::{debug, warn};
+    
+    use tracing::{debug, info, warn};
 
-    use commonware_cryptography::{bls12381::{self, dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Hasher, Scheme};
+    use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Hasher, Scheme};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{Oracle, Receiver, Sender, Link, Network};
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
@@ -287,6 +287,10 @@ mod tests {
                     guard.values().cloned().collect()
                 };
 
+                if mailbox_vec.len() <= 1 {
+                    panic!("insuffient mempool nodes spawned, have {}", mailbox_vec.len());
+                }
+
                 let Some(mut mailbox)= mailbox_vec.pop() else {
                     panic!("no single mailbox provided");
                 };
@@ -294,19 +298,31 @@ mod tests {
                 
                 // issue tx to the first validator
                 let mut digests = Vec::new();
-                for i in 1..num_txs {
+                for i in 0..num_txs {
                     let tx = RawTransaction::new(Bytes::from(format!("tx-{}", i)));
                     let submission_res = mailbox.issue_tx(tx.clone()).await;
                     if !submission_res {
                         warn!(?tx.digest, "failed to submit tx");
+                        continue;
                     }
+                    debug!("tx submitted: {}", tx.digest);
                     digests.push(tx.digest);
                 }
+
+                if digests.len() == 0 {
+                    panic!("zero txs issued");
+                }
+
+                context.sleep(Duration::from_secs(5)).await;
 
                 // check if the tx appear in other validators
                 for mut mailbox in mailbox_vec {
                     for digest in digests.iter() {
+                        let Some(tx) = mailbox.get_tx(digest.clone()).await else {
+                            panic!("digest: {} not found at mailbox", digest);
+                        };
 
+                        info!("tx found at mempool: {}", tx.digest);
                     }
                 }
             });
@@ -355,10 +371,16 @@ mod tests {
         shares_vec.sort_by(|a, b| a.index.cmp(&b.index));
 
         runner.start(async move {
-            let (_oracle, validators, pks, mut registrations ) = initialize_simulation(
+            let (_oracle, validators, _, mut registrations ) = initialize_simulation(
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
+            let mailboxes = Arc::new(Mutex::new(BTreeMap::<
+                PublicKey,
+                mempool::Mailbox,
+            >::new()));
+            spawn_mempools(context.with_label("mempool"), &validators, &mut registrations, &mut mailboxes.lock().unwrap());
+            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1);
         });
     }
 }

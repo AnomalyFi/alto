@@ -8,7 +8,7 @@ use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
         poly,
-    }, ed25519::{PrivateKey, PublicKey}, sha256, Bls12381, Ed25519, Scheme
+    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
@@ -16,7 +16,7 @@ use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use futures::future::try_join_all;
 use governor::Quota;
-use prometheus_client::metrics::{self, gauge::Gauge};
+use prometheus_client::metrics::{gauge::Gauge};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -30,7 +30,7 @@ use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
-const METRICS_PORT: u16 = 9090;
+// const METRICS_PORT: u16 = 9090;
 
 const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;
