@@ -82,6 +82,8 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
 
     /// Run the application actor.
     async fn run(mut self, mut syncer: syncer::Mailbox) {
+        //TODO Need to init genesis of chain here. 
+
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();

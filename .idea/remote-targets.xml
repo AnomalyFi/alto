@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteTargetsManager">
+    <targets>
+      <target name="WSL - Ubuntu" type="wsl" uuid="08761bde-8a1d-4118-928d-91c7e8c35882">
+        <config>
+          <option name="distributionMsId" value="Ubuntu" />
+          <option name="projectRootOnTarget" value="{exitCode=0, timeout=false, cancelled=false, stdout=/tmp/tmp.YXg9neGfqz&#10;, stderr=}/alto" />
+        </config>
+        <ContributedStateBase type="RsLanguageRuntime">
+          <config>
+            <option name="cargoPath" value="/home/noah/.cargo/bin/cargo" />
+            <option name="cargoVersion" value="1.85.1 (d73d2caf9 2024-12-31)" />
+            <option name="rustcPath" value="/home/noah/.cargo/bin/rustc" />
+            <option name="rustcVersion" value="1.85.1 (4eb161250 2025-03-15)" />
+          </config>
+        </ContributedStateBase>
+      </target>
+    </targets>
+  </component>
+</project>
