@@ -3,6 +3,7 @@ use commonware_cryptography::bls12381::primitives::{
     group::{Public, Share},
     poly::Poly,
 };
+use commonware_resolver::{p2p};
 use commonware_utils::Array;
 use std::collections::HashMap;
 
@@ -76,5 +77,17 @@ impl<P: Array> T for Coordinator<P> {
 
     fn share(&self, _: Self::Index) -> Option<&Self::Share> {
         Some(&self.share)
+    }
+}
+
+impl <P: Array> p2p::Coordinator for Coordinator<P>  {
+    type PublicKey = P; 
+
+    fn peers(&self) -> &Vec<Self::PublicKey> {
+        &self.signers        
+    }
+
+    fn peer_set_id(&self) -> u64 {
+        0    
     }
 }

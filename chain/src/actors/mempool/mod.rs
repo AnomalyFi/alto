@@ -5,6 +5,7 @@ pub mod collector;
 pub mod mempool;
 pub mod handler;
 pub mod key;
+pub mod archive;
 
 #[cfg(test)]
 mod tests {
