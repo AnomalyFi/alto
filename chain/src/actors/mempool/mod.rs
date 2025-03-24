@@ -3,6 +3,8 @@ pub mod ingress;
 pub mod coordinator;
 pub mod collector;
 pub mod mempool;
+pub mod handler;
+pub mod key;
 
 #[cfg(test)]
 mod tests {
@@ -18,9 +20,9 @@ mod tests {
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{Oracle, Receiver, Sender, Link, Network};
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
-    use futures::{channel::oneshot, future::join_all};
+    use futures::{channel::{mpsc, oneshot}, future::join_all};
 
-    use super::{collector, mempool::{self, Mempool, RawTransaction}};
+    use super::{collector, ingress, mempool::{self, Mempool, RawTransaction}};
 
     type Registrations<P> = HashMap<P, ((Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>))>;
 
@@ -258,7 +260,7 @@ mod tests {
             context.with_label("app").spawn(move |_| app.run(mailbox, mempool_mailbox));
             let ((a1, a2), (b1, b2), (c1, c2)) = registrations.remove(validator).unwrap();
             engine.start((a1, a2), (b1, b2));
-            mempool.start((c1, c2));
+            mempool.start((c1, c2), app_mailbox.clone());
         }
     }
 
@@ -266,6 +268,7 @@ mod tests {
         context: Context,
         validators: &[(PublicKey, Ed25519, Share)],
         registrations: &mut Registrations<PublicKey>,
+        app_mailbox: &mut ingress::Mailbox<sha256::Digest, PublicKey>,
         mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>,
     ) {
         for (validator, _, _) in validators.iter() {
@@ -278,7 +281,7 @@ mod tests {
             );
             mailboxes.insert(validator.clone(), mailbox);
             let ((_, _), (_, _), (c1, c2)) = registrations.remove(validator).unwrap();
-            mempool.start((c1, c2));
+            mempool.start((c1, c2), app_mailbox.clone());
         }
     }
 
@@ -390,6 +393,8 @@ mod tests {
         shares_vec.sort_by(|a, b| a.index.cmp(&b.index));
 
         info!("mempool p2p test started");
+        let (app_mailbox_sender, _) = mpsc::channel(1024);
+        let mut app_mailbox = ingress::Mailbox::new(app_mailbox_sender);
 
         runner.start(async move {
             let (_oracle, validators, _, mut registrations ) = initialize_simulation(
@@ -400,7 +405,7 @@ mod tests {
                 PublicKey,
                 mempool::Mailbox<sha256::Digest>,
             >::new()));
-            spawn_mempools(context.with_label("mempool"), &validators, &mut registrations, &mut mailboxes.lock().unwrap());
+            spawn_mempools(context.with_label("mempool"), &validators, &mut registrations, &mut app_mailbox, &mut mailboxes.lock().unwrap());
             spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1, false).await;
         });
     }

@@ -1,12 +1,14 @@
 use std::{collections::HashMap, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
-use commonware_cryptography::{ed25519::PublicKey, sha256::{self}, Digest, Hasher, Sha256};
+use commonware_cryptography::{bls12381::primitives::group::Public, ed25519::PublicKey, sha256::{self}, Digest, Hasher, Sha256};
 use commonware_p2p::{Receiver, Recipients, Sender};
 use commonware_runtime::{Clock, Handle, Spawner};
 use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
 use commonware_macros::select;
 use tracing::{debug, warn};
+
+use super::{actor, ingress};
 
 #[derive(Clone)]
 pub struct Batch<D: Digest>  {
@@ -251,9 +253,10 @@ impl<R: Clock + Spawner, D: Digest> Mempool<R, D>
         batch_network: (
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
-        )
+        ),
+        mut app_mailbox: ingress::Mailbox<D, PublicKey>
     ) -> Handle<()> {
-        self.context.spawn_ref()(self.run(batch_network))
+        self.context.spawn_ref()(self.run(batch_network, app_mailbox))
     }
 
     async fn run(
@@ -262,8 +265,8 @@ impl<R: Clock + Spawner, D: Digest> Mempool<R, D>
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ), 
+        mut app_mailbox: ingress::Mailbox<D, PublicKey>
     ) {
-
         let mut propose_timeout = self.context.current() + self.cfg.batch_propose_interval;
         loop {
             select! {
@@ -334,9 +337,12 @@ impl<R: Clock + Spawner, D: Digest> Mempool<R, D>
                         continue;
                     }
 
+                    // 1. send raw batch over p2p
                     let batch = Batch::new(self.txs.drain(..txs_cnt).collect(), self.context.current());
                     self.batches.insert(batch.digest, batch.clone());
                     batch_network.0.send(Recipients::All, batch.serialize().into(), true).await.expect("failed to broadcast batch");
+                    // 2. send batch digest over broadcast layer
+                    app_mailbox.broadcast(batch.digest).await;
 
                     // reset the timeout
                     propose_timeout = self.context.current() + self.cfg.batch_propose_interval;
