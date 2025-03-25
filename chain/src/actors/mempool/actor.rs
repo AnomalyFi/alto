@@ -42,13 +42,13 @@ impl<D: Digest, P: Array> Actor<D, P> {
                     }
                 }
                 Message::Verify(_context, _payload, sender) => {
-                    // TODO: backfill inplace?
+                    debug!(digest=?_payload, "incoming verification request");
                     let Some(_) = mempool.get_batch(_payload).await else {
                         warn!(?_payload, "batch not exists");
                         let _ = sender.send(false);
                         continue;
                     };
-                    debug!("issue verfication to batch {}", _payload);
+                    debug!("issue verfication to batch={}", _payload);
                     let result = sender.send(true);
                     if result.is_err() {
                         error!("verify dropped");

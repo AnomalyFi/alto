@@ -14,12 +14,12 @@ use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
 use commonware_macros::select;
 use governor::Quota;
 use rand::Rng;
-use tracing::{debug, warn};
+use tracing::{debug, warn, info};
 use governor::clock::Clock as GClock;
-use tracing_subscriber::fmt::time;
 use super::{actor, handler::{Handler, self}, key::{self, MultiIndex, Value}, ingress, coordinator::Coordinator, archive::Wrapped};
+use crate::maybe_delay_between;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Batch<D: Digest>  {
     pub timestamp: SystemTime,
     // mark if the batch is accepted by the network, i.e. the network has received & verified the batch 
@@ -110,7 +110,7 @@ impl<D: Digest> Batch<D>
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RawTransaction<D: Digest> {
     pub raw: Bytes,
 
@@ -158,6 +158,7 @@ pub enum Message<D: Digest> {
     BatchConsumed {
         digests: Vec<D>,
         block_number: u64,
+        response: oneshot::Sender<bool>,
     },
     // proposer consume batches to produce a block
     ConsumeBatches {
@@ -219,10 +220,10 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batches")
     }
 
-    pub async fn consumed_batches(&mut self, digests: Vec<D>, block_number: u64) -> Vec<Batch<D>> {
-        let (_, receiver) = oneshot::channel();
+    pub async fn consumed_batches(&mut self, digests: Vec<D>, block_number: u64) -> bool {
+        let (response, receiver) = oneshot::channel();
         self.sender
-            .send(Message::BatchConsumed { digests, block_number})
+            .send(Message::BatchConsumed { digests, block_number, response })
             .await
             .expect("failed to mark batches as consumed");
 
@@ -323,7 +324,7 @@ impl<
             })
             .await
             .expect("Failed to initialize accepted archive");
-
+            
         let consumed_journal = Journal::init(
             context.with_label("consumed_journal"), 
             journal::variable::Config {
@@ -404,7 +405,7 @@ impl<
                 producer: handler,
                 mailbox_size: self.mailbox_size,
                 requester_config: requester::Config {
-                    public_key: self.public_key,
+                    public_key: self.public_key.clone(),
                     rate_limit: self.backfill_quota,
                     initial: Duration::from_secs(1),
                     timeout: Duration::from_secs(2),
@@ -462,7 +463,7 @@ impl<
                         },
                         // received when a block is finalized, i.e. finalization message is received, 
                         // remove consumed batches from buffer & put them in consumed archive
-                        Message:: BatchConsumed { digests, block_number } => {
+                        Message:: BatchConsumed { digests, block_number, response } => {
                             // update the seen height
                             self.block_height_seen = block_number;
 
@@ -475,6 +476,12 @@ impl<
                                     }
                                 })
                                 .collect();
+                            let consumed_keys_len = consumed_keys.len();
+
+                            // not all provided keys are consumed, there must be state corruption, panic immediately
+                            if consumed_keys_len != digests.len() {
+                                panic!("not all provided batch digests consumed, provided={:?}, consumed={:?}", digests, consumed_keys);
+                            }
 
                             let consumed_batches: Vec<Batch<D>> = consumed_keys.into_iter()
                                 .filter_map(|key| self.batches.remove(&key))
@@ -483,6 +490,8 @@ impl<
                             for batch in consumed_batches.iter() {
                                 consumed.put(block_number, batch.digest, batch.serialize().into()).await.expect("Failed to insert accepted batch");
                             }
+
+                            let _ = response.send(true);
                         },
                         // for validators, this should be only called when they receive 
                         // 1. a digest from broadcast primitive
@@ -546,12 +555,15 @@ impl<
                         continue;
                     }
 
-                    // 1. send raw batch over p2p
                     let batch = Batch::new(self.txs.drain(..txs_cnt).collect(), self.context.current());
                     self.batches.insert(batch.digest, batch.clone());
-                    batch_network.0.send(Recipients::All, batch.serialize().into(), true).await.expect("failed to broadcast batch");
-                    // 2. send batch digest over broadcast layer
-                    app_mailbox.broadcast(batch.digest).await;
+
+                    debug!("broadcasting batch & digest={}, peer={}", batch.digest, self.public_key.clone());
+                    maybe_delay_between! {
+                        self.context,
+                        app_mailbox.broadcast(batch.digest).await;
+                        batch_network.0.send(Recipients::All, batch.serialize().into(), true).await.expect("failed to broadcast batch");
+                    }
 
                     // reset the timeout
                     propose_timeout = self.context.current() + self.batch_propose_interval;
@@ -563,7 +575,7 @@ impl<
                         continue;
                     };
 
-                    debug!(?sender, digest=?batch.digest, "received batch");
+                    debug!(?sender, digest=?batch.digest, receiver=?self.public_key, "received batch");
                     let _ = self.batches.entry(batch.digest).or_insert(batch);
                 },
 
@@ -586,6 +598,7 @@ impl<
                                         let _ = response.send(consumed);
                                         continue;
                                     }
+                                    debug!(?digest, "missing batch");
                                 }
                             }         
                         },
@@ -599,15 +612,17 @@ impl<
                                     }
 
                                     if let Some(waiters) = waiters.remove(&batch.digest) {
-                                        debug!(?batch.digest, "waiters resolved via batch");
+                                        debug!(?batch.digest, ?self.public_key, "waiters resolved via batch");
                                         for waiter in waiters {
                                             let _ = waiter.send(Some(batch.clone()));
                                         }
                                     }
 
                                     debug!(?batch.digest, "receive a batch from resolver");
-                                    // add received batch to buffer
-                                    self.batches.insert(batch.digest, batch);
+                                    // add received batch to buffer if not exists
+                                    self.batches.entry(batch.digest).or_insert(batch);
+
+                                    let _ = response.send(true);
                                 }
                             }         
                         },

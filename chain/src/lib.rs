@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod actors;
 pub mod engine;
+pub mod macros;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {

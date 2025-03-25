@@ -10,10 +10,11 @@ pub mod archive;
 #[cfg(test)]
 mod tests {
     use core::panic;
-    use std::{collections::{BTreeMap, HashMap}, sync::{Arc, Mutex}, time::Duration};
+    use std::{collections::{BTreeMap, HashMap}, num::NonZeroU32, sync::{Arc, Mutex}, time::Duration};
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
     
+    use governor::Quota;
     use prometheus_client::metrics::info;
     use tracing::{debug, info, warn};
 
@@ -25,7 +26,12 @@ mod tests {
 
     use super::{collector, ingress, mempool::{self, Mempool, RawTransaction}};
 
-    type Registrations<P> = HashMap<P, ((Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>), (Sender<P>, Receiver<P>))>;
+    type Registrations<P> = HashMap<P, (
+        (Sender<P>, Receiver<P>), 
+        (Sender<P>, Receiver<P>), 
+        (Sender<P>, Receiver<P>),
+        (Sender<P>, Receiver<P>)
+    )>;
 
     #[allow(dead_code)]
     enum Action {
@@ -41,16 +47,19 @@ mod tests {
         (Sender<PublicKey>, Receiver<PublicKey>),
         (Sender<PublicKey>, Receiver<PublicKey>),
         (Sender<PublicKey>, Receiver<PublicKey>),
+        (Sender<PublicKey>, Receiver<PublicKey>),
     )> { 
         let mut registrations = HashMap::new();        
         for validator in validators.iter() {
             let (digest_sender, digest_receiver) = oracle.register(validator.clone(), 4).await.unwrap();
             let (ack_sender, ack_receiver) = oracle.register(validator.clone(), 5).await.unwrap();
-            let (chunk_sender, chunk_receiver) = oracle.register(validator.clone(), 6).await.unwrap();
+            let (batch_sender, batch_receiver) = oracle.register(validator.clone(), 6).await.unwrap();
+            let (batch_backfill_sender, batch_backfill_receiver) = oracle.register(validator.clone(), 7).await.unwrap();
             registrations.insert(validator.clone(), (
                 (digest_sender, digest_receiver),
                 (ack_sender, ack_receiver),
-                (chunk_sender, chunk_receiver),
+                (batch_sender, batch_receiver),
+                (batch_backfill_sender, batch_backfill_receiver),
             ));
         }
         registrations
@@ -198,23 +207,28 @@ mod tests {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn spawn_validator_engines(
+    async fn spawn_validator_engines(
         context: Context,
         identity: poly::Public,
         pks: &[PublicKey],
         validators: &[(PublicKey, Ed25519, Share)],
         registrations: &mut Registrations<PublicKey>,
-        mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>,
         collectors: &mut BTreeMap<PublicKey, super::collector::Mailbox<Ed25519, sha256::Digest>>,
         refresh_epoch_timeout: Duration,
         rebroadcast_timeout: Duration,
-    ) {
+    ) -> BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>> {
+        let mut mailboxes = BTreeMap::new();
         let namespace = b"my testing namespace";
         for (validator, scheme, share) in validators.iter() {
-            let (mempool, mempool_mailbox) = Mempool::new(context.with_label("mempool"), mempool::Config { 
+            let (mempool, mempool_mailbox) = Mempool::init(context.with_label("mempool"), mempool::Config { 
                 batch_propose_interval: Duration::from_millis(500), 
                 batch_size_limit: 1024*1024, 
-            });
+                backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                mailbox_size: 1024,
+                public_key: scheme.public_key(),
+                block_height: 0,
+                partition_prefix: format!("mempool"),
+            }).await;
             mailboxes.insert(validator.clone(), mempool_mailbox.clone());
 
 
@@ -244,7 +258,7 @@ mod tests {
                     crypto: scheme.clone(),
                     application: app_mailbox.clone(),
                     collector: collectors.get(validator).unwrap().clone(),
-                    coordinator,
+                    coordinator: coordinator.clone(),
                     mailbox_size: 1024,
                     verify_concurrent: 1024,
                     namespace: namespace.to_vec(),
@@ -259,31 +273,50 @@ mod tests {
             );
 
             context.with_label("app").spawn(move |_| app.run(mailbox, mempool_mailbox));
-            let ((a1, a2), (b1, b2), (c1, c2)) = registrations.remove(validator).unwrap();
+            let ((a1, a2), (b1, b2), (c1, c2), (d1, d2)) = registrations.remove(validator).unwrap();
             engine.start((a1, a2), (b1, b2));
-            mempool.start((c1, c2), app_mailbox.clone());
+            mempool.start((c1, c2), (d1, d2), coordinator, app_mailbox.clone());
         }
+        mailboxes
     }
 
-    fn spawn_mempools(
+    async fn spawn_mempools(
         context: Context,
+        identity: poly::Public,
+        pks: &[PublicKey],
         validators: &[(PublicKey, Ed25519, Share)],
         registrations: &mut Registrations<PublicKey>,
         app_mailbox: &mut ingress::Mailbox<sha256::Digest, PublicKey>,
-        mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>,
-    ) {
-        for (validator, _, _) in validators.iter() {
-            let (mempool, mailbox) = Mempool::new(
+        // mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>,
+    ) -> BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>> {
+        let mut mailboxes= BTreeMap::new();
+        for (validator, _, share) in validators.iter() {
+            let context = context.with_label(&validator.to_string());
+            let mut coordinator = super::coordinator::Coordinator::<PublicKey>::new(
+                identity.clone(),
+                pks.to_vec(),
+                *share,
+            );
+            coordinator.set_view(111);
+
+            let (mempool, mailbox) = Mempool::init(
                 context.with_label("mempool"), 
                 mempool::Config {
-                    batch_propose_interval: Duration::from_millis(500),
-                    batch_size_limit: 1024*1024, // 1MB
+                    batch_propose_interval: Duration::from_millis(500), 
+                    batch_size_limit: 1024*1024, 
+                    backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                    mailbox_size: 1024,
+                    public_key: validator.clone(),
+                    block_height: 0,
+                    partition_prefix: format!("mempool"),
                 }
-            );
+            ).await;
             mailboxes.insert(validator.clone(), mailbox);
-            let ((_, _), (_, _), (c1, c2)) = registrations.remove(validator).unwrap();
-            mempool.start((c1, c2), app_mailbox.clone());
+            let ((_, _), (_, _), (c1, c2), (d1, d2)) = registrations.remove(validator).unwrap();
+            mempool.start((c1, c2), (d1, d2),coordinator, app_mailbox.clone());
         }
+
+        mailboxes
     }
 
     async fn spawn_tx_issuer_and_wait(
@@ -291,6 +324,7 @@ mod tests {
         mailboxes: Arc<Mutex<BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>>>,
         num_txs: u32,
         wait_batch_acknowlegement: bool,
+        consume_batch: bool,
     ) {
         context
             .clone()
@@ -347,6 +381,20 @@ mod tests {
                             }
                             info!("batch contain tx {} acknowledged", batch.digest);
                         }
+                        if consume_batch {
+                            // 1. consume the batches
+                            let batches = mailbox.consume_batches().await;
+                            assert!(batches.len() != 0, "expected some batches to consume");
+                            info!("consumed batches: {:?}", batches);
+                            // 2. mark the batches as consumed
+                            info!("marking batches as consumed");
+                            let digests = batches.iter().map(|batch| batch.digest).collect();
+                            let _ = mailbox.consumed_batches(digests, 0).await;
+                            // 3. try consume batches again
+                            let batches = mailbox.consume_batches().await;
+                            assert!(batches.len() == 0, "expected zero batches to consume");
+                            info!("zero batches left after consumption");
+                        }
                     }
                 }
             }).await.unwrap();
@@ -365,23 +413,23 @@ mod tests {
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
-            let mailboxes = Arc::new(Mutex::new(BTreeMap::<
-                PublicKey,
-                mempool::Mailbox<sha256::Digest>,
-            >::new()));
+            // let mailboxes = Arc::new(Mutex::new(BTreeMap::<
+            //     PublicKey,
+            //     mempool::Mailbox<sha256::Digest>,
+            // >::new()));
             let mut collectors = BTreeMap::<PublicKey, super::collector::Mailbox<Ed25519, sha256::Digest>>::new();
-            spawn_validator_engines(
+            let mailboxes = spawn_validator_engines(
                 context.with_label("validator"), 
                 identity.clone(), 
                 &pks, 
                 &validators, 
                 &mut registrations, 
-                &mut mailboxes.lock().unwrap(), 
                 &mut collectors, 
                 Duration::from_millis(100), 
                 Duration::from_secs(5)
-            );
-            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1, true).await;
+            ).await;
+            let guarded_mailboxes = Arc::new(Mutex::new(mailboxes));
+            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), guarded_mailboxes, 1, true, true).await;
         });
     }
 
@@ -390,7 +438,7 @@ mod tests {
         let num_validators: u32 = 4;
         let quorum: u32 = 3;
         let (runner, mut context, _) = Executor::timed(Duration::from_secs(30));
-        let (_, mut shares_vec) = dkg::ops::generate_shares(&mut context, None, num_validators, quorum);        
+        let (identity, mut shares_vec) = dkg::ops::generate_shares(&mut context, None, num_validators, quorum);        
         shares_vec.sort_by(|a, b| a.index.cmp(&b.index));
 
         info!("mempool p2p test started");
@@ -398,16 +446,24 @@ mod tests {
         let mut app_mailbox = ingress::Mailbox::new(app_mailbox_sender);
 
         runner.start(async move {
-            let (_oracle, validators, _, mut registrations ) = initialize_simulation(
+            let (_oracle, validators, pks, mut registrations ) = initialize_simulation(
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
-            let mailboxes = Arc::new(Mutex::new(BTreeMap::<
-                PublicKey,
-                mempool::Mailbox<sha256::Digest>,
-            >::new()));
-            spawn_mempools(context.with_label("mempool"), &validators, &mut registrations, &mut app_mailbox, &mut mailboxes.lock().unwrap());
-            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), mailboxes, 1, false).await;
+            // let mailboxes = Arc::new(Mutex::new(BTreeMap::<
+            //     PublicKey,
+            //     mempool::Mailbox<sha256::Digest>,
+            // >::new()));
+            let mailboxes = spawn_mempools(
+                context.with_label("mempool"), 
+                identity,
+                &pks, 
+                &validators, 
+                &mut registrations, 
+                &mut app_mailbox, 
+            ).await;
+            let guarded_mailboxes = Arc::new(Mutex::new(mailboxes));
+            spawn_tx_issuer_and_wait(context.with_label("tx_issuer"), guarded_mailboxes, 1, false, false).await;
         });
     }
 }
