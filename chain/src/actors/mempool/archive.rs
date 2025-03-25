@@ -5,8 +5,6 @@ use commonware_utils::Array;
 use futures::lock::Mutex;
 use std::sync::Arc;
 
-const BATCH_INDEX: u64 = 0;
-
 /// Archive wrapper that handles all locking.
 #[derive(Clone)]
 pub struct Wrapped<T, K, B, R>
@@ -43,23 +41,22 @@ where
     }
 
     /// Inserts a value into the archive with the given index and key.
-    pub async fn put(&self, key: K, data: Bytes) -> Result<(), archive::Error> {
+    pub async fn put(&self, index: u64, key: K, data: Bytes) -> Result<(), archive::Error> {
         let mut archive = self.inner.lock().await;
-        archive.put(BATCH_INDEX, key, data).await?;
+        archive.put(index, key, data).await?;
         Ok(())
     }
 
-    // TODO: revisit: do we need to prune as a DA?
-    // /// Prunes entries from the archive up to the specified minimum index.
-    // pub async fn prune(&self, min_index: u64) -> Result<(), archive::Error> {
-    //     let mut archive = self.inner.lock().await;
-    //     archive.prune(min_index).await?;
-    //     Ok(())
-    // }
+    /// Prunes entries from the archive up to the specified minimum index.
+    pub async fn prune(&self, min_index: u64) -> Result<(), archive::Error> {
+        let mut archive = self.inner.lock().await;
+        archive.prune(min_index).await?;
+        Ok(())
+    }
 
-    // /// Retrieves the next gap in the archive.
-    // pub async fn next_gap(&self, start: u64) -> (Option<u64>, Option<u64>) {
-    //     let archive = self.inner.lock().await;
-    //     archive.next_gap(start)
-    // }
+    /// Retrieves the next gap in the archive.
+    pub async fn next_gap(&self, start: u64) -> (Option<u64>, Option<u64>) {
+        let archive = self.inner.lock().await;
+        archive.next_gap(start)
+    }
 }
