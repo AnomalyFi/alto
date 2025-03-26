@@ -4,6 +4,7 @@ use commonware_broadcast::{linked::Context, Application as A};
 use futures::{ channel::{mpsc, oneshot}, SinkExt};
 
 pub struct Payload {
+    #[allow(dead_code)]
     data: Vec<u8>
 }
 

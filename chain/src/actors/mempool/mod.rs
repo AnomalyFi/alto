@@ -15,16 +15,15 @@ mod tests {
     use commonware_broadcast::linked::{Config, Engine};
     
     use governor::Quota;
-    use prometheus_client::metrics::info;
     use tracing::{debug, info, warn};
 
-    use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Digest, Ed25519, Hasher, Scheme};
+    use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Scheme};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{Oracle, Receiver, Sender, Link, Network};
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
-    use futures::{channel::{mpsc, oneshot}, future::join_all};
+    use futures::channel::mpsc;
 
-    use super::{collector, ingress, mempool::{self, Mempool, RawTransaction}};
+    use super::{ingress, mempool::{self, Mempool, RawTransaction}};
 
     type Registrations<P> = HashMap<P, (
         (Sender<P>, Receiver<P>), 

@@ -7,7 +7,7 @@ use commonware_broadcast::linked;
 use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
-        poly::{self, public},
+        poly,
     }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
 };
 use commonware_deployer::ec2::Peers;
@@ -16,7 +16,7 @@ use commonware_runtime::{tokio, Clock, Metrics, Network, Runner, Spawner};
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use futures::future::try_join_all;
 use governor::Quota;
-use prometheus_client::metrics::{gauge::Gauge};
+use prometheus_client::metrics::gauge::Gauge;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -223,7 +223,7 @@ fn main() {
         let mempool_batch_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
         let mempool_batch_broadcaster = network.register(
             MEMPOOL_BATCH_CHANNEL,
-            mempool_ack_limit,
+            mempool_batch_limit,
             config.message_backlog,
             Some(3),
         );
@@ -232,7 +232,7 @@ fn main() {
         let mempool_backfill_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
         let mempool_backfill_broadcaster = network.register(
             MMEPOOL_BACKFILL_CHANNEL,
-            mempool_ack_limit,
+            mempool_backfill_limit,
             config.message_backlog,
             Some(3),
         );

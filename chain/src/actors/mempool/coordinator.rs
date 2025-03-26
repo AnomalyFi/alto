@@ -3,7 +3,7 @@ use commonware_cryptography::bls12381::primitives::{
     group::{Public, Share},
     poly::Poly,
 };
-use commonware_resolver::{p2p};
+use commonware_resolver::p2p;
 use commonware_utils::Array;
 use std::collections::HashMap;
 

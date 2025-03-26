@@ -1,4 +1,4 @@
-use super::{ ingress::{Mailbox, Message}, mempool::{self, Batch}};
+use super::{ ingress::{Mailbox, Message}, mempool};
 use commonware_broadcast::Broadcaster;
 use commonware_cryptography::Digest;
 use commonware_utils::Array;

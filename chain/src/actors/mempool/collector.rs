@@ -1,12 +1,8 @@
 use commonware_broadcast::{linked::Prover, Collector as Z, Proof, };
 use commonware_cryptography::{bls12381::primitives::group, Digest, Scheme};
 use futures::{
-    channel::{mpsc, oneshot},
+    channel::mpsc,
     SinkExt, StreamExt,
-};
-use std::{
-    cmp::max,
-    collections::{BTreeMap, HashMap},
 };
 use tracing::error;
 
