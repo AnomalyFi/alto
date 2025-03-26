@@ -1,4 +1,4 @@
-use alto_chain::{actors::mempool, engine, Config};
+use alto_chain::{actors::mempool::{self, mempool::Mempool}, engine, Config};
 use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
@@ -7,7 +7,7 @@ use commonware_broadcast::linked;
 use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
-        poly,
+        poly::{self, public},
     }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
 };
 use commonware_deployer::ec2::Peers;
@@ -36,8 +36,10 @@ const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;
 const BROADCASTER_CHANNEL: u32 = 2;
 const BACKFILLER_CHANNEL: u32 = 3;
-const MEMPOOL_CHANNEL: u32 = 4;
+const MEMPOOL_DIGEST_CHANNEL: u32 = 4;
 const MEMPOOL_ACK_CHANNEL: u32 = 5;
+const MEMPOOL_BATCH_CHANNEL: u32 = 6;
+const MMEPOOL_BACKFILL_CHANNEL: u32 = 7;
 
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
@@ -204,7 +206,7 @@ fn main() {
         // Register mempool broadcast channel
         let mempool_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
         let mempool_broadcaster = network.register(
-            MEMPOOL_CHANNEL,
+            MEMPOOL_DIGEST_CHANNEL,
             mempool_limit,
             config.message_backlog,
             Some(3),
@@ -213,6 +215,23 @@ fn main() {
         let mempool_ack_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
         let mempool_ack_broadcaster = network.register(
             MEMPOOL_ACK_CHANNEL,
+            mempool_ack_limit,
+            config.message_backlog,
+            Some(3),
+        );
+
+        let mempool_batch_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_batch_broadcaster = network.register(
+            MEMPOOL_BATCH_CHANNEL,
+            mempool_ack_limit,
+            config.message_backlog,
+            Some(3),
+        );
+        
+
+        let mempool_backfill_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_backfill_broadcaster = network.register(
+            MMEPOOL_BACKFILL_CHANNEL,
             mempool_ack_limit,
             config.message_backlog,
             Some(3),
@@ -230,13 +249,13 @@ fn main() {
 
         // Create mempool/broadcast/Proof of Availability engine
         let mempool_namespace = b"mempool";
-        let (mempool_application, mempool_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
+        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
         let broadcast_coordinator = mempool::coordinator::Coordinator::new(identity.clone(), peer_keys.clone(), share);
         let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, sha256::Digest>::new(mempool_namespace, identity_public);
         let (broadcast_engine, broadcast_mailbox) = linked::Engine::new(context.with_label("broadcast_engine"), linked::Config { 
             crypto:  signer.clone(), 
-            coordinator: broadcast_coordinator, 
-            application: mempool_mailbox, 
+            coordinator: broadcast_coordinator.clone(), 
+            application: mempool_app_mailbox.clone(), 
             collector: collector_mailbox, 
             mailbox_size: 1024, 
             verify_concurrent: 1024,
@@ -249,8 +268,24 @@ fn main() {
             journal_heights_per_section: 10, 
             journal_replay_concurrency: 1 
         });
-        context.with_label("mempool").spawn(|_| mempool_application.run(broadcast_mailbox));
+
+        let (mempool, mempool_mailbox) = Mempool::init(
+            context.with_label("mempoool"), 
+            mempool::mempool::Config { 
+                batch_propose_interval: Duration::from_millis(500), 
+                batch_size_limit: 1024*1024, 
+                backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                mailbox_size: 1024,
+                public_key: public_key,
+                block_height: 0,
+                partition_prefix: format!("mempool"),
+            }
+        ).await;
+
         let broadcast_engine = broadcast_engine.start(mempool_broadcaster, mempool_ack_broadcaster);
+
+        let mempool_handler = mempool.start(mempool_batch_broadcaster, mempool_backfill_broadcaster, broadcast_coordinator, mempool_app_mailbox);
+        let mempool_broadcast_app_handler = context.with_label("mempool_app").spawn(|_| mempool_application.run(broadcast_mailbox, mempool_mailbox));
 
         // Create engine
         let config = engine::Config {
@@ -350,7 +385,7 @@ fn main() {
         });
 
         // Wait for any task to error
-        if let Err(e) = try_join_all(vec![p2p, engine, broadcast_engine, system, metrics]).await {
+        if let Err(e) = try_join_all(vec![p2p, engine, broadcast_engine, system, metrics, mempool_handler, mempool_broadcast_app_handler]).await {
             error!(?e, "task failed");
         }
     });

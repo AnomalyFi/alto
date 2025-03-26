@@ -382,7 +382,7 @@ impl<
         self.context.spawn_ref()(self.run(batch_network, backfill_network, coordinator, app_mailbox))
     }
 
-    async fn run(
+    pub async fn run(
         mut self,
         mut batch_network: (
             impl Sender<PublicKey = PublicKey>,

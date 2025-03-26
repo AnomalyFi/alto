@@ -94,41 +94,7 @@ mod tests {
         }
     }
 
-    async fn await_collectors(
-        context: Context,
-        collectors: &BTreeMap<PublicKey, collector::Mailbox<Ed25519, sha256::Digest>>,
-        threshold: u64,
-    ) {
-        let mut receivers = Vec::new();
-        for (sequencer, mailbox) in collectors.iter() {
-            // Create a oneshot channel to signal when the collector has reached the threshold.
-            let (tx, rx) = oneshot::channel();
-            receivers.push(rx);
-
-            // Spawn a watcher for the collector.
-            context.with_label("collector_watcher").spawn({
-                let sequencer = sequencer.clone();
-                let mut mailbox = mailbox.clone();
-                move |context| async move {
-                    loop {
-                        let tip = mailbox.get_tip(sequencer.clone()).await.unwrap_or(0);
-                        debug!(tip, ?sequencer, "collector");
-                        if tip >= threshold {
-                            let _ = tx.send(sequencer.clone());
-                            break;
-                        }
-                        context.sleep(Duration::from_millis(100)).await;
-                    }
-                }
-            });
-        }
-
-        // Wait for all oneshot receivers to complete.
-        let results = join_all(receivers).await;
-        assert_eq!(results.len(), collectors.len());
-    }
-
-        async fn initialize_simulation(
+    async fn initialize_simulation(
         context: Context,
         num_validators: u32,
         shares_vec: &mut [Share],
@@ -168,42 +134,6 @@ mod tests {
         };
         link_validators(&mut oracle, &pks, link, None).await;
         (oracle, validators, pks, registrations)
-    }
-
-    fn spawn_proposer(
-        context: Context,
-        mailboxes: Arc<
-            Mutex<BTreeMap<PublicKey, super::ingress::Mailbox<sha256::Digest, PublicKey>>>,
-        >,
-        invalid_when: fn(u64) -> bool,
-    ) {
-        context
-            .clone()
-            .with_label("invalid signature proposer")
-            .spawn(move |context| async move {
-                let mut iter = 0;
-                loop {
-                    iter += 1;
-                    let mailbox_vec: Vec<super::ingress::Mailbox<sha256::Digest, PublicKey>> = {
-                        let guard = mailboxes.lock().unwrap();
-                        guard.values().cloned().collect()
-                    };
-                    for mut mailbox in mailbox_vec {
-                        let payload = Bytes::from(format!("hello world, iter {}", iter));
-                        let mut hasher = sha256::Sha256::default();
-                        hasher.update(&payload);
-
-                        // Inject an invalid digest by updating with the payload again.
-                        if invalid_when(iter) {
-                            hasher.update(&payload);
-                        }
-
-                        let digest = hasher.finalize();
-                        mailbox.broadcast(digest).await;
-                    }
-                    context.sleep(Duration::from_millis(250)).await;
-                }
-            });
     }
 
     #[allow(clippy::too_many_arguments)]
