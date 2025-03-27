@@ -1,6 +1,6 @@
 use std::error::Error;
-use crate::Address;
-use crate::state_db::StateDB;
+use crate::address::Address;
+use crate::state::StateDB;
 use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;
 

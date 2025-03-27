@@ -1,7 +1,7 @@
 use alto_actions::transfer::{Transfer, TransferError};
 use alto_storage::database::Database;
 use alto_storage::hashmap_db::HashmapDatabase;
-use alto_storage::account::Balance;
+use alto_types::account::Balance;
 use alto_types::Address;
 
 const TEST_FAUCET_ADDRESS: &[u8] = b"0x0123456789abcdef0123456789abcd";

@@ -49,7 +49,8 @@ impl Database for RocksDbDatabase {
 #[cfg(test)]
 mod tests {
     use alto_types::Address;
-    use crate::account::Account;
+    use alto_types::account::Account;
+    use alto_types::address::Address;
     use super::*;
     #[test]
     fn test_rocks_db_basic() {

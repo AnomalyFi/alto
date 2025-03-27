@@ -1,4 +1,6 @@
-use crate::Address;
+use crate::address::Address;
+use crate::{PrivateKey, PublicKey};
+
 pub enum AuthTypes {
     ED25519,
 }
@@ -7,7 +9,7 @@ pub enum AuthTypes {
 // auth should have a method to verify signatures.
 // also batch signature verification.
 pub trait Auth {
-    fn public_key(&self) -> Vec<u8>; // return the public key of the signer.
+    fn public_key(&self) -> PublicKey; // return the public key of the signer.
     fn address(&self) -> Address; // return the account address of the signer.
     fn verify(&self, data: &[u8], signature: &[u8]) -> bool; // verify a signature.
     fn batch_verify(&self, data: &[u8], signatures: Vec<&[u8]>) -> bool; // batch verify signatures. returns error if batch verification fails.
@@ -16,8 +18,8 @@ pub trait Auth {
 
 pub struct Wallet {
     auth: AuthTypes, // auth type
-    p_key: Vec<u8>, // private key
-    pub_key: Vec<u8>, // public key
+    p_key: PrivateKey, // private key
+    pub_key: PublicKey, // public key
     address: Address, // account address
 }
 

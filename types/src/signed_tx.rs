@@ -1,14 +1,14 @@
-use crate::Address;
+use crate::address::Address;
+use crate::PublicKey;
 use crate::wallet::{AuthTypes, Wallet};
-use crate::tx::{Tx, Unit};
+use crate::tx::Tx;
 
 // this is sent by the user to the validators.
 pub struct SignedTx<'a> {
     pub tx: Tx<'a>,
     pub auth_type: AuthTypes,
 
-
-    pub_key: Vec<u8>,
+    pub_key: PublicKey,
     address: Address,
     signature: Vec<u8>,
 }

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use alto_types::Address;
-use crate::account::{Account, Balance};
+use std::error::Error;
 use crate::database::Database;
 
 pub struct HashmapDatabase {
@@ -29,6 +28,10 @@ impl Database for HashmapDatabase {
         self.data.get(&str_key).map_or(
             Ok(None),
             |v| Ok(Some(v.clone().into())))
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
+        todo!()
     }
 }
 

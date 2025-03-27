@@ -1,8 +1,5 @@
-use commonware_codec::{Codec, Error, Reader, SizedCodec, Writer};
-use commonware_cryptography::{ed25519::PublicKey, Ed25519, Scheme};
-use commonware_cryptography::ed25519::PrivateKey;
-use alto_types::Address;
-use rand::rngs::OsRng;
+use commonware_codec::{Codec, Error, Reader, Writer};
+use crate::address::Address;
 
 pub type Balance = u64;
 
