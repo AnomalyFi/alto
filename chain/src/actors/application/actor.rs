@@ -89,6 +89,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         let genesis_digest = genesis.digest();
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
+
         while let Some(message) = self.mailbox.next().await {
             match message {
                 Message::Genesis { response } => {

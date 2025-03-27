@@ -70,6 +70,7 @@ dependencies = [
  "serde_yaml",
  "sysinfo",
  "thiserror 2.0.12",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -201,6 +201,9 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
         // Start consensus
         let consensus_handle = self.consensus.start(voter_network, resolver_network);
 
+        // Start the router
+        let router_config = RouterConfig::default_config();
+
         // Wait for any actor to finish
         if let Err(e) =
             try_join_all(vec![application_handle, syncer_handle, consensus_handle]).await
