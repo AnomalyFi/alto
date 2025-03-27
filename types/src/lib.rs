@@ -9,6 +9,11 @@ mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
 pub mod wasm;
 mod codec;
+mod wallet;
+mod tx;
+mod signed_tx;
+mod state_db;
+
 use more_asserts;
 use more_asserts::assert_le;
 use rand::rngs::OsRng;

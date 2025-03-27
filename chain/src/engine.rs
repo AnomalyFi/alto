@@ -202,7 +202,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
         let consensus_handle = self.consensus.start(voter_network, resolver_network);
 
         // Start the router
-        let router_config = RouterConfig::default_config();
+        // let router_config = RouterConfig::default_config();
 
         // Wait for any actor to finish
         if let Err(e) =
