@@ -1,12 +1,19 @@
 use std::collections::HashMap;
-use crate::database::Database;
 use std::error::Error;
-use rocksdb::LogLevel::Error;
+use alto_types::address::Address;
+use crate::database::Database;
 use alto_types::state::{State};
 use crate::state_db::StateDb;
 
 const ACCOUNT_KEY_TYPE: u8 = 0;
+
 type UnitKey<'a> = alto_types::state::UnitKey<'a>; // 1st byte denotes the type of key. 0b for account key, 1b for others.
+
+pub fn decode_unit_key(key: UnitKey) -> (u8, Address) {
+    let key_type: u8 = key[0];
+    let address_bytes: &[u8] = &key[1..];
+    (key_type, address_bytes.into())
+}
 
 pub enum OpAction {
     Read, // key was read
@@ -47,6 +54,7 @@ impl<'a> TxStateView<'a> {
     pub fn init_cache(&mut self, cache: HashMap<UnitKey, Vec<u8>>) {
         self.cache = cache;
     }
+
     pub fn get_from_cache(&self, key: UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         self.cache.get(&key).map_or(
             Ok(None),
@@ -54,6 +62,7 @@ impl<'a> TxStateView<'a> {
     }
 
     pub fn get_from_state(&self, key: UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        let (key_type, address)
         match key[0] {
             ACCOUNT_KEY_TYPE => {
                 self.get_from_state(key)
@@ -62,16 +71,16 @@ impl<'a> TxStateView<'a> {
         }
     }
 
-    pub fn get(&self, key: alto_types::state::UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>>{
+    pub fn get(&self, key: UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>>{
+    }
+
+    pub fn get_multi_key(&self, key: UnitKey) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
         todo!()
     }
-    pub fn get_multi_key(&self, key: Vec<alto_types::state::UnitKey>) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
+    pub fn update(&mut self, key: UnitKey, value: Vec<u8>) -> Result<(), Box<dyn Error>>{
         todo!()
     }
-    pub fn update(&mut self, key: alto_types::state::UnitKey, value: Vec<u8>) -> Result<(), Box<dyn Error>>{
-        todo!()
-    }
-    pub fn delete(&mut self, key: alto_types::state::UnitKey) -> Result<(), Box<dyn Error>> {
+    pub fn delete(&mut self, key: UnitKey) -> Result<(), Box<dyn Error>> {
         todo!()
     }
     pub fn commit(&mut self) -> Result<(), Box<dyn Error>> {
@@ -79,5 +88,23 @@ impl<'a> TxStateView<'a> {
     }
     pub fn rollback(&mut self) -> Result<(), Box<dyn Error>> {
         todo!()
+    }
+
+    pub fn process_get_action(&mut self, cmd_type: u8, key: &UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        match cmd_type {
+            ACCOUNT_KEY_TYPE => {
+                self.state_db.get(key)
+            }
+            _ => Err(format!("invalid state key {:?}", key).into())
+        }
+    }
+
+    pub fn process_put_action(&mut self, cmd_type: u8, key: &UnitKey) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        match cmd_type {
+            ACCOUNT_KEY_TYPE => {
+                self.state_db.get(key)
+            }
+            _ => Err(format!("invalid state key {:?}", key).into())
+        }
     }
 }

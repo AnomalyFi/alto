@@ -44,13 +44,15 @@ impl Database for RocksDbDatabase {
         let result = self.db.get(key)?;
         Ok(result)
     }
+
+    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.db.delete(key)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use alto_types::Address;
-    use alto_types::account::Account;
-    use alto_types::address::Address;
     use super::*;
     #[test]
     fn test_rocks_db_basic() {
@@ -60,28 +62,5 @@ mod tests {
         db.put(key, value).unwrap();
         let retrieved = db.get(key).unwrap().unwrap();
         assert_eq!(retrieved.as_slice(), value);
-    }
-
-    #[test]
-    fn test_rocks_db_accounts() {
-        let mut db = RocksDbDatabase::new_tmp_db().expect("db could not be created");
-
-        let mut account = Account::new();
-        let test_address = Address::new(b"0xBEEF");
-        account.address = test_address.clone();
-        account.balance = 100;
-
-        // get account for test address is empty
-        let empty_result = db.get_account(&test_address);
-        empty_result.unwrap().is_none();
-
-        // set account
-        db.set_account(&account).unwrap();
-
-        let acct_result = db.get_account(&test_address).unwrap();
-        assert!(acct_result.is_some());
-        let account = acct_result.unwrap();
-        assert_eq!(account.address, test_address);
-        assert_eq!(account.balance, 100);
     }
 }

@@ -4,6 +4,7 @@ use alto_types::address::Address;
 use bytes::Bytes;
 use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
+use crate::rocks_db::RocksDbDatabase;
 
 const ACCOUNTS_PREFIX: &[u8] = b"sal_accounts";
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
@@ -71,5 +72,51 @@ impl StateDb {
         key.push(b':');
         key.extend_from_slice(sub_id);
         key
+    }
+}
+
+impl Database for StateDb {
+    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
+       self.db.put(key, value)
+    }
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        self.db.get(key)
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.db.delete(key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alto_types::address::Address;
+    use alto_types::account::Account;
+    use alto_types::address::Address;
+    use super::*;
+
+    #[test]
+    fn test_rocks_db_accounts() {
+        let db = RocksDbDatabase::new_tmp_db().expect("db could not be created");
+        let mut state_db = StateDb::new(Box::new(db));
+
+        let mut account = Account::new();
+        let test_address = Address::new(b"0xBEEF");
+        account.address = test_address.clone();
+        account.balance = 100;
+
+        // get account for test address is empty
+        let empty_result = state_db.get_account(&test_address);
+        empty_result.unwrap().is_none();
+
+        // set account
+        state_db.set_account(&account).unwrap();
+
+        let acct_result = state_db.get_account(&test_address).unwrap();
+        assert!(acct_result.is_some());
+        let account = acct_result.unwrap();
+        assert_eq!(account.address, test_address);
+        assert_eq!(account.balance, 100);
     }
 }

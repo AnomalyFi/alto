@@ -1,8 +1,8 @@
 use std::error::Error;
 use crate::address::Address;
-use crate::state::StateDB;
 use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;
+use crate::state::State;
 
 pub enum UnitType {
     Transfer,
@@ -18,15 +18,16 @@ pub struct UnitContext {
 
 
 // unit need to be simple and easy to be packed in the tx and executed by the vm.
-pub trait Unit {
-    // type DB: Database;
-    // type T: TxStateViewTrait<Self::DB>;
+pub trait Unit : Send + Sync {
+    fn unit_type(&self) -> UnitType;
+    fn encode(&self) -> Vec<u8>;
+    fn decode(&mut self, bytes: &[u8]);
 
-
-    fn unit_type(&self) -> UnitType; // return the unit type.
-    fn encode(&self) -> Vec<u8>; // encode the unit.
-    fn decode(bytes: &[u8]) -> Self; // decode the unit.
-    fn apply(&self, context: &UnitContext, state: &mut dyn StateDB) -> Result<Option<Vec<u8>>, Box <dyn Error>>; // apply the unit to the state view.
+    fn apply(
+        &self,
+        context: &UnitContext,
+        state: &mut Box<dyn State>,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>>;
 }
 
 
@@ -39,7 +40,7 @@ pub struct Tx<'a> {
     // timestamp is used to prevent replay attacks. and counter infinite spam attacks as Tx does not have nonce.
     pub timestamp: u64,
     // units are fundamental unit of a tx. similar to actions.
-    pub units: Vec<dyn Unit>,
+    pub units: Vec<Box<dyn Unit>>,
     // max fee is the maximum fee the user is willing to pay for the tx.
     pub max_fee: u64,
     // priority fee is the fee the user is willing to pay for the tx to be included in the next block.
@@ -59,7 +60,7 @@ pub trait TxChars {
     // init is used to create a new instance of Tx.
     fn init() -> Self;
     // new is used to create a new instance of Tx with given units and chain id.
-    fn new(units: Vec<dyn Unit>, chain_id: u64) -> Self;
+    fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self;
     // set_fee is used to set the max fee and priority fee of the tx.
     fn set_fee(&mut self, max_fee: u64, priority_fee: u64);
     // sign is used to sign the tx with the given wallet.

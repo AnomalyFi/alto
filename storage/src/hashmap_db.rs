@@ -16,8 +16,8 @@ impl HashmapDatabase {
 
 impl Database for HashmapDatabase {
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let str_value: String = String::from_utf8(value.into())?;
         let key_value: String = String::from_utf8(key.into())?;
+        let str_value: String = String::from_utf8(value.into())?;
 
         self.data.insert(key_value, str_value);
         Ok(())
@@ -31,7 +31,9 @@ impl Database for HashmapDatabase {
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
-        todo!()
+        let key_value: String = String::from_utf8(key.into())?;
+        self.data.remove(&key_value);
+        Ok(())
     }
 }
 
