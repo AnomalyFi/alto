@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::{Duration, SystemTime}};
+use std::{collections::{HashMap}, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
 use commonware_cryptography::{ed25519::PublicKey, sha256, Digest, Hasher, Sha256};
@@ -22,9 +22,6 @@ use crate::maybe_delay_between;
 #[derive(Clone, Debug)]
 pub struct Batch<D: Digest>  {
     pub timestamp: SystemTime,
-    // mark if the batch is accepted by the network, i.e. the network has received & verified the batch 
-    pub accepted: bool, 
-
     pub txs: Vec<RawTransaction<D>>,
     pub digest: D,
 }
@@ -48,7 +45,6 @@ impl<D: Digest> Batch<D>
         Self {
             txs,
             digest,
-            accepted: false,
             timestamp 
         }
     }
@@ -95,7 +91,6 @@ impl<D: Digest> Batch<D>
         // and set timestamp to the current time.
         Some(Self {
             timestamp,
-            accepted: false,
             txs,
             digest,
         })
@@ -280,7 +275,10 @@ pub struct Mempool<
 
     public_key: PublicKey,
 
+
     batches: HashMap<D, Batch<D>>,
+    
+    acknowledged: Vec<D>,
     accepted: Archive<TwoCap, D, B, R>,
     consumed: Archive<TwoCap, D, B, R>,
 
@@ -350,6 +348,7 @@ impl<
             context,
             public_key: cfg.public_key,
             batches: HashMap::new(),
+            acknowledged: Vec::new(),
             accepted: accepted_archive,
             consumed: consumed_archive,
 
@@ -446,19 +445,27 @@ impl<
                             self.txs.push(payload);
                             let _ = response.send(true);
                         },
-                        // batch ackowledged by the network, put in the accepted archive and mark batch as accepted
+                        // batch ackowledged by the network 
                         Message::BatchAcknowledged { digest, response } => {
+                            debug!("batch accepted by the network: {}", digest);
+
+                            self.acknowledged.push(digest);
                             if let Some(batch) = self.batches.get_mut(&digest) {
                                 accepted.put(self.block_height_seen, digest, batch.serialize().into()).await.expect("unable to store accepted batch");
-                                batch.accepted = true;
-                                let _ = response.send(true);
-                                debug!("batch accepted by the network: {}", digest);
                             } else {
-                                let _ = response.send(false);
+                                panic!("batch not found: {}", digest);
                             }
+                            let _ = response.send(true);
                         },
                         Message::ConsumeBatches { response } => { 
-                            let batches = self.batches.iter().filter(|(_, batch)| batch.accepted).map(|(_, batch)| batch.clone()).collect();
+                            // we do not remove anything from the mempool state as the digests/batches may not be consumed
+                            let batches = self.acknowledged.iter().filter_map(|digest| {
+                                let Some(batch) = self.batches.get(&digest) else {
+                                    // shouldn't happen
+                                    panic!("batch not found: {}", digest);
+                                };
+                                Some(batch.clone())
+                            }).collect();
                             let _ = response.send(batches);
                         },
                         // received when a block is finalized, i.e. finalization message is received, 
@@ -483,13 +490,17 @@ impl<
                                 panic!("not all provided batch digests consumed, provided={:?}, consumed={:?}", digests, consumed_keys);
                             }
 
+                            // remove digests and batches
                             let consumed_batches: Vec<Batch<D>> = consumed_keys.into_iter()
                                 .filter_map(|key| self.batches.remove(&key))
                                 .collect();
 
+                            self.acknowledged.retain(|digest| !digests.contains(digest));
+
                             for batch in consumed_batches.iter() {
                                 consumed.put(block_number, batch.digest, batch.serialize().into()).await.expect("Failed to insert accepted batch");
                             }
+
 
                             let _ = response.send(true);
                         },

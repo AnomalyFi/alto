@@ -305,9 +305,6 @@ mod tests {
                             let Some(batch) = mailbox.get_batch_contain_tx(digest.clone()).await else {
                                 panic!("batch not found");
                             };
-                            if !batch.accepted {
-                                panic!("batch {} not acknowledged", batch.digest);
-                            }
                             info!("batch contain tx {} acknowledged", batch.digest);
                         }
                         if consume_batch {
@@ -342,10 +339,6 @@ mod tests {
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
-            // let mailboxes = Arc::new(Mutex::new(BTreeMap::<
-            //     PublicKey,
-            //     mempool::Mailbox<sha256::Digest>,
-            // >::new()));
             let mut collectors = BTreeMap::<PublicKey, super::collector::Mailbox<Ed25519, sha256::Digest>>::new();
             let mailboxes = spawn_validator_engines(
                 context.with_label("validator"), 
@@ -379,10 +372,6 @@ mod tests {
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
-            // let mailboxes = Arc::new(Mutex::new(BTreeMap::<
-            //     PublicKey,
-            //     mempool::Mailbox<sha256::Digest>,
-            // >::new()));
             let mailboxes = spawn_mempools(
                 context.with_label("mempool"), 
                 identity,
