@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod actors;
 pub mod engine;
+pub mod macros;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -68,6 +69,8 @@ pub struct Config {
     pub directory: String,
     pub worker_threads: usize,
     pub log_level: String,
+
+    pub metrics_port: u16,
 
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,

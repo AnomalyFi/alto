@@ -45,6 +45,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "commonware-broadcast",
  "commonware-consensus",
  "commonware-cryptography",
  "commonware-deployer",
@@ -804,6 +805,28 @@ name = "colorchoice"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
+
+[[package]]
+name = "commonware-broadcast"
+version = "0.0.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2845a125a1996d82604970a3d72c4fd68e314432ff33023dafbde3a0d788ca2"
+dependencies = [
+ "bytes",
+ "commonware-cryptography",
+ "commonware-macros",
+ "commonware-p2p",
+ "commonware-runtime",
+ "commonware-storage",
+ "commonware-utils",
+ "futures",
+ "prometheus-client",
+ "prost",
+ "prost-build",
+ "rand",
+ "thiserror 2.0.12",
+ "tracing",
+]
 
 [[package]]
 name = "commonware-consensus"

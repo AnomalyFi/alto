@@ -1,15 +1,14 @@
-use alto_chain::{engine, Config};
+use alto_chain::{actors::mempool::{self, mempool::Mempool}, engine, Config};
 use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
+use commonware_broadcast::linked;
 use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
         poly,
-    },
-    ed25519::{PrivateKey, PublicKey},
-    Ed25519, Scheme,
+    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
@@ -31,12 +30,17 @@ use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
-const METRICS_PORT: u16 = 9090;
+// const METRICS_PORT: u16 = 9090;
 
 const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;
 const BROADCASTER_CHANNEL: u32 = 2;
 const BACKFILLER_CHANNEL: u32 = 3;
+const MEMPOOL_DIGEST_CHANNEL: u32 = 4;
+const MEMPOOL_ACK_CHANNEL: u32 = 5;
+const MEMPOOL_BATCH_CHANNEL: u32 = 6;
+const MMEPOOL_BACKFILL_CHANNEL: u32 = 7;
+
 
 const LEADER_TIMEOUT: Duration = Duration::from_secs(1);
 const NOTARIZATION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -99,6 +103,7 @@ fn main() {
     let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
     let identity_public = *poly::public(&identity);
     let public_key = signer.public_key();
+    let metrics_port = config.metrics_port;
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
@@ -190,6 +195,41 @@ fn main() {
             Some(3),
         );
 
+        // Register mempool broadcast channel
+        let mempool_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_broadcaster = network.register(
+            MEMPOOL_DIGEST_CHANNEL,
+            mempool_limit,
+            config.message_backlog,
+            Some(3),
+        );
+
+        let mempool_ack_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_ack_broadcaster = network.register(
+            MEMPOOL_ACK_CHANNEL,
+            mempool_ack_limit,
+            config.message_backlog,
+            Some(3),
+        );
+
+        let mempool_batch_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_batch_broadcaster = network.register(
+            MEMPOOL_BATCH_CHANNEL,
+            mempool_batch_limit,
+            config.message_backlog,
+            Some(3),
+        );
+        
+
+        let mempool_backfill_limit = Quota::per_second(NonZeroU32::new(8).unwrap());
+        let mempool_backfill_broadcaster = network.register(
+            MMEPOOL_BACKFILL_CHANNEL,
+            mempool_backfill_limit,
+            config.message_backlog,
+            Some(3),
+        );
+        
+
         // Create network
         let p2p = network.start();
 
@@ -198,6 +238,46 @@ fn main() {
         if let Some(uri) = config.indexer {
             indexer = Some(Client::new(&uri, identity_public.into()));
         }
+
+        // Create mempool/broadcast/Proof of Availability engine
+        let mempool_namespace = b"mempool";
+        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
+        let broadcast_coordinator = mempool::coordinator::Coordinator::new(identity.clone(), peer_keys.clone(), share);
+        let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, sha256::Digest>::new(mempool_namespace, identity_public);
+        let (broadcast_engine, broadcast_mailbox) = linked::Engine::new(context.with_label("broadcast_engine"), linked::Config { 
+            crypto:  signer.clone(), 
+            coordinator: broadcast_coordinator.clone(), 
+            application: mempool_app_mailbox.clone(), 
+            collector: collector_mailbox, 
+            mailbox_size: 1024, 
+            verify_concurrent: 1024,
+            namespace: mempool_namespace.to_vec(), 
+            refresh_epoch_timeout: Duration::from_millis(100), 
+            rebroadcast_timeout: Duration::from_secs(5),
+            epoch_bounds: (1,1), 
+            height_bound: 2, 
+            journal_name_prefix: format!("broadcast-linked-seq/{}/", public_key),
+            journal_heights_per_section: 10, 
+            journal_replay_concurrency: 1 
+        });
+
+        let (mempool, mempool_mailbox) = Mempool::init(
+            context.with_label("mempoool"), 
+            mempool::mempool::Config { 
+                batch_propose_interval: Duration::from_millis(500), 
+                batch_size_limit: 1024*1024, 
+                backfill_quota: Quota::per_second(NonZeroU32::new(10).unwrap()),
+                mailbox_size: 1024,
+                public_key: public_key,
+                block_height: 0,
+                partition_prefix: format!("mempool"),
+            }
+        ).await;
+
+        let broadcast_engine = broadcast_engine.start(mempool_broadcaster, mempool_ack_broadcaster);
+
+        let mempool_handler = mempool.start(mempool_batch_broadcaster, mempool_backfill_broadcaster, broadcast_coordinator, mempool_app_mailbox);
+        let mempool_broadcast_app_handler = context.with_label("mempool_app").spawn(|_| mempool_application.run(broadcast_mailbox, mempool_mailbox));
 
         // Create engine
         let config = engine::Config {
@@ -220,6 +300,7 @@ fn main() {
             fetch_rate_per_peer: resolver_limit,
             indexer,
         };
+
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
@@ -278,8 +359,8 @@ fn main() {
         });
 
         // Serve metrics
-        let metrics = context.with_label("metrics").spawn(|context| async move {
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), METRICS_PORT);
+        let metrics = context.with_label("metrics").spawn(move |context| async move {
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), metrics_port);
             let listener = context
                 .bind(addr)
                 .await
@@ -296,7 +377,7 @@ fn main() {
         });
 
         // Wait for any task to error
-        if let Err(e) = try_join_all(vec![p2p, engine, system, metrics]).await {
+        if let Err(e) = try_join_all(vec![p2p, engine, broadcast_engine, system, metrics, mempool_handler, mempool_broadcast_app_handler]).await {
             error!(?e, "task failed");
         }
     });

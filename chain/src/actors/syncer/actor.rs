@@ -287,7 +287,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             let mut resolver = resolver.clone();
             let last_view_processed = last_view_processed.clone();
             let verified = verified.clone();
-            let notarized = notarized.clone();
+            let notarized: Wrapped<TwoCap, Digest, B, R> = notarized.clone();
             let finalized = finalized.clone();
             let blocks = blocks.clone();
             move |_| async move {
