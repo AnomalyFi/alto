@@ -279,6 +279,8 @@ pub struct Mempool<
     batches: HashMap<D, Batch<D>>,
     
     acknowledged: Vec<D>,
+
+    //TODO: replace the following two
     accepted: Archive<TwoCap, D, B, R>,
     consumed: Archive<TwoCap, D, B, R>,
 

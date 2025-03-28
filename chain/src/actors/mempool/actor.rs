@@ -11,7 +11,6 @@ use tracing::{error, warn, debug};
 
 pub struct Actor<D: Digest, P: Array> {
     mailbox: mpsc::Receiver<Message<D, P>>,
-    // TODO: add a mempool structure here
 }
 
 impl<D: Digest, P: Array> Actor<D, P> {
