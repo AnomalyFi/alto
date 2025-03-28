@@ -93,7 +93,6 @@ impl Database for StateDb {
 mod tests {
     use alto_types::address::Address;
     use alto_types::account::Account;
-    use alto_types::address::Address;
     use super::*;
 
     #[test]
