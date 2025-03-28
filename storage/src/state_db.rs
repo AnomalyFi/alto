@@ -18,8 +18,9 @@ impl StateDb {
         StateDb { db }
     }
 
-    pub fn get_account(&self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
+    pub fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
+
         let result = self.db.get(key.as_slice())?;
         match result {
             None => Ok(None),
@@ -40,7 +41,7 @@ impl StateDb {
         Ok(())
     }
 
-    pub fn get_balance(&self, address: &Address) -> Option<Balance> {
+    pub fn get_balance(&mut self, address: &Address) -> Option<Balance> {
         let result = self.get_account(address).and_then(|acc| match acc {
             Some(acc) => Ok(acc.balance),
             None => Ok(0),
@@ -75,16 +76,16 @@ impl StateDb {
     }
 }
 
-impl Database for StateDb {
-    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
+impl<'b> Database for StateDb {
+    fn put<'a>(&mut self, key: &'a [u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
        self.db.put(key, value)
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn get<'a>(&mut self, key: &'a [u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         self.db.get(key)
     }
 
-    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
+    fn delete<'a>(&mut self, key: &'a [u8]) -> Result<(), Box<dyn Error>> {
         self.db.delete(key)
     }
 }

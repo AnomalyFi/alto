@@ -40,7 +40,7 @@ impl Database for RocksDbDatabase {
         Ok(())
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         let result = self.db.get(key)?;
         Ok(result)
     }
