@@ -34,7 +34,7 @@ impl RocksDbDatabase {
 
 }
 
-impl Database for RocksDbDatabase {
+impl Database<'_> for RocksDbDatabase {
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
         self.db.put(key, value)?;
         Ok(())

@@ -14,7 +14,7 @@ impl HashmapDatabase {
     }
 }
 
-impl Database for HashmapDatabase {
+impl Database<'_> for HashmapDatabase {
     fn put<'a>(&mut self, key: &'a [u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let key_value: String = String::from_utf8(key.into())?;
         let str_value: String = String::from_utf8(value.into())?;

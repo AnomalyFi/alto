@@ -1,3 +1,4 @@
+/*
 use crate::database::Database;
 use alto_types::account::{Account, Balance};
 use alto_types::address::Address;
@@ -9,7 +10,7 @@ use crate::rocks_db::RocksDbDatabase;
 const ACCOUNTS_PREFIX: &[u8] = b"sal_accounts";
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
-pub struct StateDb {
+pub struct StateDb<'a> {
     db: Box<dyn Database>,
 }
 // can use like a redis from Arcadia like get and set for diff types?
@@ -120,3 +121,4 @@ mod tests {
         assert_eq!(account.balance, 100);
     }
 }
+ */

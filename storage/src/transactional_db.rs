@@ -22,10 +22,10 @@ type Key<'a> = &'a[u8];
 //     pub value: Vec<u8>,
 // }
 
-pub trait TransactionalDb<'b> : Database {
-    fn init_cache<'a: 'b>(&mut self, cache: HashMap<Key<'b>, Vec<u8>>); // initialize the cache with an already available hashmap of key-value pairs.
-    fn get_from_cache<'a: 'b>(&self, key: Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the cache. If the key is not in the cache, it will return an error.
-    fn get_from_db(&mut self, key: Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the underlying storage. If the key is not in the storage, it will return an error.
+pub trait TransactionalDb<'b> : Database<'b> {
+    fn init_cache(&mut self, cache: HashMap<Key<'b>, Vec<u8>>); // initialize the cache with an already available hashmap of key-value pairs.
+    fn get_from_cache(&self, key: Key<'b>) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the cache. If the key is not in the cache, it will return an error.
+    fn get_from_db(&mut self, key: Key<'b>) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the underlying storage. If the key is not in the storage, it will return an error.
     fn commit(&mut self) -> Result<(), Box<dyn Error>>;
     fn rollback(&mut self) -> Result<(), Box<dyn Error>>;
 }
@@ -34,10 +34,10 @@ pub struct InMemoryCachingTransactionalDb<'a> {
     pub cache: HashMap<Key<'a>, Vec<u8>>, // key-value, state view cache before tx execution. This is not an exhaustive list of all state keys read/write during tx. If cache misses occur, the state view will read from the underlying storage.
     // pub ops: Vec<crate::tx_state_view::Op<'a>>, // list of state ops applied.
     pub touched: HashMap<Key<'a>, Vec<u8>>, // key-value pairs that were changed during tx execution. This is a subset of the cache.
-    pub db: Box<dyn Database>, // underlying state storage, to use when cache misses occur.
+    pub db: Box<dyn Database<'a>>, // underlying state storage, to use when cache misses occur.
 }
 impl<'a> InMemoryCachingTransactionalDb<'a> {
-    pub fn new(db: Box<dyn Database>) -> InMemoryCachingTransactionalDb<'a> {
+    pub fn new(db: Box<dyn Database<'a>>) -> InMemoryCachingTransactionalDb<'a> {
         Self{
             cache: HashMap::new(),
             touched: HashMap::new(),
@@ -52,12 +52,12 @@ impl<'a> InMemoryCachingTransactionalDb<'a> {
 }
 
 impl<'b> TransactionalDb<'b> for InMemoryCachingTransactionalDb<'b> {
-    fn init_cache<'a: 'b>(&mut self, cache: HashMap<Key, Vec<u8>>) {
+    fn init_cache(&mut self, cache: HashMap<Key<'b>, Vec<u8>>) {
         self.cache = cache;
     }
 
     // get a key from the cache. If the key is not in the cache, it will return an error.
-    fn get_from_cache<'a: 'b>(&self, key: Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn get_from_cache(&self, key: Key<'b>) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         // searches touched
         if let Some(v) = self.get_from_touched(&key)? {
             return Ok(Some(v.clone()));
@@ -73,11 +73,11 @@ impl<'b> TransactionalDb<'b> for InMemoryCachingTransactionalDb<'b> {
     }
 
     // get a key from the underlying storage. If the key is not in the storage, it will return an error.
-    fn get_from_db<'a>(&mut self, key: Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn get_from_db(&mut self, key: Key<'b>) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         self.db.get(key)
     }
 
-    fn commit<'a>(&mut self) -> Result<(), Box<dyn Error>> {
+    fn commit(&mut self) -> Result<(), Box<dyn Error>> {
         for (key, value) in self.touched.iter() {
             self.cache.insert(key.clone(), value.clone());
             //TODO: what to do if an intermediary operation fails maybe use rocks db transact?
@@ -88,19 +88,19 @@ impl<'b> TransactionalDb<'b> for InMemoryCachingTransactionalDb<'b> {
         Ok(())
     }
 
-    fn rollback<'a>(&mut self) -> Result<(), Box<dyn Error>> {
+    fn rollback(&mut self) -> Result<(), Box<dyn Error>> {
         self.touched.clear();
         Ok(())
     }
 }
 
-impl<'b> Database for InMemoryCachingTransactionalDb<'b> {
-    fn put<'a: 'b>(&mut self, key: &'a [u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
+impl<'b> Database<'b> for InMemoryCachingTransactionalDb<'b> {
+    fn put(&mut self, key: &'b [u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
         self.touched.insert(key, value.to_vec());
         Ok(())
     }
 
-    fn get<'a: 'b>(&mut self, key: &'a [u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+    fn get(&mut self, key: &'b [u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         match self.get_from_cache(key) {
             Ok(Some(value)) => {
                 Ok(Some(value.into()))
@@ -126,7 +126,7 @@ impl<'b> Database for InMemoryCachingTransactionalDb<'b> {
     }
 
     // TODO: The below deletes in both cache and underlying db. Change later such that deletes must be committed.
-    fn delete<'a>(&mut self, key: &'a [u8]) -> Result<(), Box<dyn Error>> {
+    fn delete(&mut self, key: &'b [u8]) -> Result<(), Box<dyn Error>> {
         self.touched.remove(key);
         self.cache.remove(key);
         self.db.delete(key)
@@ -137,13 +137,49 @@ impl<'b> Database for InMemoryCachingTransactionalDb<'b> {
 mod tests {
     use crate::hashmap_db::HashmapDatabase;
     use super::*;
+
     #[test]
     fn test_transactional_db_basic() {
-        let mut db = HashmapDatabase::new();
-        let mut tx_db = InMemoryCachingTransactionalDb::new(Box::new(db));
-        let test_key = b"test_key".to_vec();
-        let test_value = b"test_value".to_vec();
-        tx_db.put(&test_key, &test_value).unwrap();
+        let mut hash_db = HashmapDatabase::new();  // underlying store
+
+        let test_key1 = b"test_key1".to_vec();
+        let test_value1 = b"test_value1".to_vec();
+        let test_key2 = b"test_key2".to_vec();
+        let test_value2 = b"test_value2".to_vec();
+        let test_key3 = b"test_key3".to_vec();
+        let test_value3 = b"test_value3".to_vec();
+
+        {
+            let mut tx_db = InMemoryCachingTransactionalDb::new(Box::new(hash_db));
+
+            // should add to cache but not underlying store db
+            tx_db.put(&test_key1, &test_value1).unwrap();
+            assert!(tx_db.get_from_db(&test_key1).unwrap().is_none());
+            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().is_some(), true);
+            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().unwrap(), test_value1);
+            assert_eq!(tx_db.get(&test_key1).unwrap().unwrap(), test_value1);
+
+            // commit the change. should be visible in underlying store.
+            tx_db.commit().unwrap();
+            assert!(tx_db.get_from_db(&test_key1).unwrap().is_some());
+            assert_eq!(tx_db.get_from_db(&test_key1).unwrap().unwrap(), test_value1);
+            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().unwrap(), test_value1);
+            assert_eq!(tx_db.get(&test_key1).unwrap().unwrap(), test_value1);
+
+            // add 2nd key-value. do not commit yet.
+            tx_db.put(&test_key2, &test_value2).unwrap();
+            assert!(tx_db.get_from_db(&test_key2).unwrap().is_none());
+            assert_eq!(tx_db.get_from_cache(&test_key2).unwrap().is_some(), true);
+            assert_eq!(tx_db.get_from_cache(&test_key2).unwrap().unwrap(), test_value2);
+            assert_eq!(tx_db.get(&test_key2).unwrap().unwrap(), test_value2);
+
+            // rollback and commit should make no changes to underlying.
+            tx_db.rollback().unwrap();
+            tx_db.commit().unwrap();
+            assert!(tx_db.get_from_db(&test_key2).unwrap().is_none());
+            assert!(tx_db.get_from_cache(&test_key2).unwrap().is_none());
+            assert!(tx_db.get(&test_key2).unwrap().is_none());
+        }
     }
 }
 

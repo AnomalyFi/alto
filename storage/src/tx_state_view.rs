@@ -3,11 +3,11 @@ use std::error::Error;
 use alto_types::address::Address;
 use crate::database::Database;
 use alto_types::state::{State};
-use crate::state_db::StateDb;
+//use crate::state_db::StateDb;
 
-const ACCOUNT_KEY_TYPE: u8 = 0;
+//const ACCOUNT_KEY_TYPE: u8 = 0;
 
-type UnitKey<'a> = alto_types::state::UnitKey<'a>; // 1st byte denotes the type of key. 0b for account key, 1b for others.
+//type UnitKey<'a> = alto_types::state::UnitKey<'a>; // 1st byte denotes the type of key. 0b for account key, 1b for others.
 
 // pub fn decode_unit_key(key: UnitKey) -> (u8, Address) {
 //     let key_type: u8 = key[0];
