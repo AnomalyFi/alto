@@ -1,47 +1,75 @@
-use std::io;
+use std::{
+   io,
+   sync::{Arc, RwLock},
+};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::{
+    routing::get,
+    extract::{Path, State},
+};
+
+use bytes::Bytes;
+use commonware_cryptography::{sha256, Digest};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use rand::Rng;
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{event, Level};
-use crate::actors::syncer;
+
+use super::ingress;
 
 pub struct RouterConfig {
-    port: i32,
+    pub port: i32,
+    pub mailbox: ingress::Mailbox
 }
 
-impl RouterConfig {
-    pub fn default_config() -> RouterConfig {
-        RouterConfig {
-            port: 7844,
-        }
-    }
+#[derive(Deserialize)]
+pub struct DummyTransaction {
+    #[serde(with = "serde_bytes")]
+    pub payload: Vec<u8>,
+}
+
+type SharedState = Arc<RwLock<AppState>>;
+
+#[derive(Clone)]
+struct AppState  {
+    mailbox: ingress::Mailbox
 }
 
 pub struct Router<R: Rng + Spawner + Metrics + Clock> {
     context: R,
-    cfg: RouterConfig,
+    port: i32,
     listener: Option<TcpListener>,
-    router: Option<axum::Router>,
+    pub router: Option<axum::Router>,
     is_active: bool,
+
+    state: SharedState
 }
 
 impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
-    const PATH_SUBMIT_BLOCK: &'static str = "/builder/submit";
+    pub const PATH_SUBMIT_TX: &'static str = "/mempool/submit";
 
     pub fn new(context: R, cfg: RouterConfig) -> Self {
         if cfg.port == 0 {
             panic!("Invalid port number");
         }
 
-        Router {
+        let state = AppState {
+            mailbox: cfg.mailbox,
+        };
+
+        let mut router = Router {
             context,
-            cfg,
+            port: cfg.port,
             listener: None,
             router: None,
             is_active: false,
-        }
+
+            state: Arc::new(RwLock::new(state))
+        };
+        router.init_router();
+
+        router
     }
 
     pub async fn start(mut self) -> Handle<()> {
@@ -57,7 +85,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
     }
 
     async fn init_listener(&mut self) -> io::Result<TcpListener> {
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", self.cfg.port)).await?;
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port)).await?;
         Ok(listener)
     }
 
@@ -65,15 +93,21 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
         "Hello world!"
     }
 
-    async fn handle_submit_block() -> impl IntoResponse {
-        "Submit block"
+    async fn handle_submit_tx(
+        State(state): State<SharedState>,
+        payload: String,
+    ) -> impl IntoResponse {
+        let mut mailbox = state.write().unwrap().mailbox.clone();
+        mailbox.test(payload).await
     }
+
 
     fn init_router(&mut self) {
         let router = axum::Router::new()
-            .route("/", get(Router::handle_default))
-            .route(Router::PATH_SUBMIT_BLOCK, get(Router::handle_submit_block()));
-
+            .route(
+                Router::<R>::PATH_SUBMIT_TX,
+                get(Router::<R>::handle_submit_tx).with_state(Arc::clone(&self.state))
+            );
         self.router = Some(router)
     }
 

@@ -10,7 +10,6 @@ pub use actor::Actor;
 mod ingress;
 pub use ingress::Mailbox;
 mod supervisor;
-mod router;
 
 pub use supervisor::Supervisor;
 
