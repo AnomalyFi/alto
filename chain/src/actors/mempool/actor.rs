@@ -56,6 +56,4 @@ impl<D: Digest, P: Array> Actor<D, P> {
             }
         }
     }
-
-    // TODO: implement handler for data received
 }

@@ -66,11 +66,6 @@ fn parse_log_level(level: &str) -> Option<Level> {
 }
 
 fn main() {
-    struct PeerAddr {
-        ip: IpAddr,
-        port: u16
-    }
-
     // Parse arguments
     let matches = Command::new("validator")
         .about("Validator for an alto chain.")
@@ -82,16 +77,13 @@ fn main() {
     let peer_file = matches.get_one::<String>("peers").unwrap();
     let peers_file = std::fs::read_to_string(peer_file).expect("Could not read peers file");
     let peers: Peers = serde_yaml::from_str(&peers_file).expect("Could not parse peers file");
-    let peers: HashMap<PublicKey, PeerAddr> = peers
+    let peers: HashMap<PublicKey, IpAddr> = peers
         .peers
         .into_iter()
         .map(|peer| {
             let key = from_hex_formatted(&peer.name).expect("Could not parse peer key");
             let key = PublicKey::try_from(key).expect("Peer key is invalid");
-            (key, PeerAddr {
-                ip: peer.ip,
-                port: peer.port
-            })
+            (key, peer.ip)
         })
         .collect();
     info!(peers = peers.len(), "loaded peers");
@@ -112,7 +104,7 @@ fn main() {
     let identity_public = *poly::public(&identity);
     let public_key = signer.public_key();
     let metrics_port = config.metrics_port;
-    let ip = peers.get(&public_key).expect("Could not find self in IPs").ip;
+    let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
         identity = hex(&identity_public.serialize()),
@@ -136,8 +128,8 @@ fn main() {
     for bootstrapper in &config.bootstrappers {
         let key = from_hex_formatted(bootstrapper).expect("Could not parse bootstrapper key");
         let key = PublicKey::try_from(key).expect("Bootstrapper key is invalid");
-        let peer_addr = peers.get(&key).expect("Could not find bootstrapper in IPs");
-        let bootstrapper_socket = format!("{}:{}", peer_addr.ip, peer_addr.port);
+        let ip = peers.get(&key).expect("Could not find bootstrapper in IPs");
+        let bootstrapper_socket = format!("{}:{}", ip, config.port);
         let bootstrapper_socket = SocketAddr::from_str(&bootstrapper_socket)
             .expect("Could not parse bootstrapper socket");
         bootstrappers.push((key, bootstrapper_socket));
@@ -157,7 +149,7 @@ fn main() {
         signer.clone(),
         P2P_NAMESPACE,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
-        SocketAddr::new(ip, config.port),
+        SocketAddr::new(*ip, config.port),
         bootstrappers,
         MAX_MESSAGE_SIZE,
     );

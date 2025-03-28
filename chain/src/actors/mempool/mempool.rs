@@ -14,7 +14,7 @@ use futures::{channel::{mpsc, oneshot}, SinkExt, StreamExt};
 use commonware_macros::select;
 use governor::Quota;
 use rand::Rng;
-use tracing::{debug, warn};
+use tracing::{debug, warn, info};
 use governor::clock::Clock as GClock;
 use super::{handler::{Handler, self}, key::{self, MultiIndex, Value}, ingress, coordinator::Coordinator, archive::Wrapped};
 use crate::maybe_delay_between;
@@ -431,10 +431,8 @@ impl<
 
             select! {
                 mailbox_message = self.mailbox.next() => {
-                    // let message = mailbox_message.expect("Mailbox closed");
                     let Some(message) = mailbox_message else {
-                        // TODO: revisit this branch, it was .expect("Mailbox closed") and will panic after unit test is finished
-                        debug!("Mailbox closed, terminating...");
+                        info!("Mailbox closed, terminating...");
                         return;
                     };
                     match message {

@@ -488,7 +488,6 @@ fn generate_local(sub_matches: &ArgMatches) {
             name: scheme.public_key().to_string(),
             region: "local".to_string(),
             ip: "127.0.0.1".parse().expect("invalid IP address"),
-            port: PORT + index as u16,
         };
         peers.push(peer);
     }

@@ -5,6 +5,7 @@ use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
+use tracing::warn;
 
 pub enum Message {
     Deliver {
@@ -48,8 +49,8 @@ impl Consumer for Handler {
         receiver.await.expect("Failed to receive deliver")
     }
 
-    async fn failed(&mut self, _: Self::Key, _: Self::Failure) {
-        // Ignore any failure
+    async fn failed(&mut self, key: Self::Key, failture: Self::Failure) {
+        warn!(?key, ?failture, "failed at consumer");
     }
 }
 
