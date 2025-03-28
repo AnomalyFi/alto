@@ -15,7 +15,6 @@ pub mod state;
 pub mod address;
 pub mod account;
 
-use more_asserts;
 use rand::rngs::OsRng;
 
 // We don't use functions here to guard against silent changes.

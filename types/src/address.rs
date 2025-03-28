@@ -17,7 +17,7 @@ impl Address {
             return Err("Address must be 32 bytes.");
         }
 
-        Ok(Address(<[u8; 32]>::try_from(bytes.clone()).unwrap()))
+        Ok(Address(<[u8; 32]>::try_from(bytes).unwrap()))
     }
 
     pub fn empty() -> Self {

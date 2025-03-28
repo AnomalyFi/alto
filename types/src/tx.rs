@@ -1,4 +1,3 @@
-use std::error::Error;
 use crate::address::Address;
 use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;

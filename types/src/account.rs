@@ -9,6 +9,12 @@ pub struct Account {
     pub balance: Balance,
 }
 
+impl Default for Account {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Account {
     pub fn new() -> Self {
         Self {
