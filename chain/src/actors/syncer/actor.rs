@@ -164,7 +164,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             block_journal,
             archive::Config {
                 translator: EightCap,
-                section_mask: 0xffff_ffff_ffff_0000u64,
+                section_mask: 0xffff_ffff_fff0_0000u64,
                 pending_writes: 0,
                 replay_concurrency: 4,
                 compression: Some(3),
@@ -287,7 +287,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             let mut resolver = resolver.clone();
             let last_view_processed = last_view_processed.clone();
             let verified = verified.clone();
-            let notarized = notarized.clone();
+            let notarized: Wrapped<TwoCap, Digest, B, R> = notarized.clone();
             let finalized = finalized.clone();
             let blocks = blocks.clone();
             move |_| async move {
@@ -512,7 +512,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             if let Some(block) = block {
                                 let view = proof.view;
                                 let height = block.height;
-                                let digest = proof.payload.clone();
+                                let digest = proof.payload;
                                 let notarization = Notarized::new(proof, block);
                                 let notarization: Bytes = notarization.serialize().into();
                                 notarized
@@ -589,10 +589,10 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             // If found, store finalization
                             if let Some(block) = block {
                                 let view = proof.view;
-                                let digest = proof.payload.clone();
+                                let digest = proof.payload;
                                 let height = block.height;
                                 finalized
-                                    .put(height, proof.payload.clone(), proof.serialize().into())
+                                    .put(height, proof.payload, proof.serialize().into())
                                     .await
                                     .expect("Failed to insert finalization");
                                 blocks
@@ -867,7 +867,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                                     debug!(?digest, height = block.height, "received block");
                                     let _ = response.send(true);
                                     blocks
-                                        .put(block.height, digest.clone(), value)
+                                        .put(block.height, digest, value)
                                         .await
                                         .expect("Failed to insert finalized block");
 

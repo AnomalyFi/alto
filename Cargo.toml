@@ -10,21 +10,22 @@ members = [ "actions",
 resolver = "2"
 
 [workspace.dependencies]
-alto-client = { version = "0.0.4", path = "client" }
-alto-types = { version = "0.0.4", path = "types" }
+alto-client = { version = "0.0.6", path = "client" }
+alto-types = { version = "0.0.6", path = "types" }
 alto-actions = { version = "0.1.0", path = "actions"}
 alto-storage = { version = "0.1.0", path = "storage"}
 alto-vm = { version = "0.1.0", path = "vm"}
-commonware-consensus = { version = "0.0.40" }
-commonware-cryptography = { version = "0.0.40" }
-commonware-deployer = { version = "0.0.40" }
-commonware-macros = { version = "0.0.40" }
-commonware-p2p = { version = "0.0.40" }
-commonware-resolver = { version = "0.0.40" }
-commonware-runtime = { version = "0.0.40" }
-commonware-storage = { version = "0.0.40" }
-commonware-stream = { version = "0.0.40" }
-commonware-utils = { version = "0.0.40" }
+commonware-broadcast = { version = "0.0.43" }
+commonware-consensus = { version = "0.0.43" }
+commonware-cryptography = { version = "0.0.43" }
+commonware-deployer = { version = "0.0.43" }
+commonware-macros = { version = "0.0.43" }
+commonware-p2p = { version = "0.0.43" }
+commonware-resolver = { version = "0.0.43" }
+commonware-runtime = { version = "0.0.43" }
+commonware-storage = { version = "0.0.43" }
+commonware-stream = { version = "0.0.43" }
+commonware-utils = { version = "0.0.43" }
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

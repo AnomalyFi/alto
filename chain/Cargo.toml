@@ -1,10 +1,10 @@
 [package]
 name = "alto-chain"
-version = "0.0.4"
+version = "0.0.6"
 publish = true
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "A minimal blockchain built with the Commonware Library."
+description = "A minimal (and wicked fast) blockchain built with the Commonware Library."
 readme = "README.md"
 homepage = "https://alto.commonware.xyz"
 repository = "https://github.com/commonwarexyz/alto/tree/main/chain"
@@ -13,6 +13,7 @@ documentation = "https://docs.rs/alto-chain"
 [dependencies]
 alto-types = { workspace = true }
 alto-client = { workspace = true }
+commonware-broadcast = { workspace = true }
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
 commonware-deployer = { workspace = true }

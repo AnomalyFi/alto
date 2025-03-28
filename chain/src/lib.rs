@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod actors;
 pub mod engine;
+pub mod macros;
 
 /// Trait for interacting with an indexer.
 pub trait Indexer: Clone + Send + Sync + 'static {
@@ -67,6 +68,9 @@ pub struct Config {
     pub port: u16,
     pub directory: String,
     pub worker_threads: usize,
+    pub log_level: String,
+
+    pub metrics_port: u16,
 
     pub allowed_peers: Vec<String>,
     pub bootstrappers: Vec<String>,
@@ -279,6 +283,7 @@ mod tests {
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: 10,
+                    skip_timeout: 5,
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
@@ -437,6 +442,7 @@ mod tests {
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: 10,
+                    skip_timeout: 5,
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
@@ -520,6 +526,7 @@ mod tests {
                 nullify_retry: Duration::from_secs(10),
                 fetch_timeout: Duration::from_secs(1),
                 activity_timeout: 10,
+                skip_timeout: 5,
                 max_fetch_count: 10,
                 max_fetch_size: 1024 * 512,
                 fetch_concurrent: 10,
@@ -653,6 +660,7 @@ mod tests {
                             nullify_retry: Duration::from_secs(10),
                             fetch_timeout: Duration::from_secs(1),
                             activity_timeout: 10,
+                            skip_timeout: 5,
                             max_fetch_count: 10,
                             max_fetch_size: 1024 * 512,
                             fetch_concurrent: 10,
@@ -770,9 +778,10 @@ mod tests {
 
             // Derive threshold
             let (public, shares) = ops::generate_shares(&mut context, None, n, threshold);
+            let public_key = *poly::public(&public);
 
             // Define mock indexer
-            let indexer = MockIndexer::new("", poly::public(&public).into());
+            let indexer = MockIndexer::new("", public_key.into());
 
             // Create instances
             let mut public_keys = HashSet::new();
@@ -796,6 +805,7 @@ mod tests {
                     nullify_retry: Duration::from_secs(10),
                     fetch_timeout: Duration::from_secs(1),
                     activity_timeout: 10,
+                    skip_timeout: 5,
                     max_fetch_count: 10,
                     max_fetch_size: 1024 * 512,
                     fetch_concurrent: 10,
