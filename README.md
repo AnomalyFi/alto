@@ -14,10 +14,6 @@ _Components are designed for deployment in adversarial environments. If you find
 * [inspector](./inspector/README.md): Inspect `alto` activity.
 * [types](./types/README.md): Common types used throughout `alto`.
 
-## Licensing
-
-This repository is dual-licensed under both the [Apache 2.0](./LICENSE-APACHE) and [MIT](./LICENSE-MIT) licenses. You may choose either license when employing this code.
-
 ## Support
 
 If you have any questions about `alto`, we encourage you to post in [GitHub Discussions](https://github.com/commonwarexyz/monorepo/discussions). We're happy to help!
