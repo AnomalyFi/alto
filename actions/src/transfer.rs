@@ -1,4 +1,4 @@
-use alto_types::Address;
+use alto_types::address::Address;
 
 const MAX_MEMO_SIZE: usize = 256;
 

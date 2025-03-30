@@ -1,4 +1,4 @@
-use alto_types::Address;
+use alto_types::address::Address;
 
 pub struct SequencerMsg {
     pub chain_id: Vec<u8>,

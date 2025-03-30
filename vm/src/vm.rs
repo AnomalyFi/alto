@@ -1,20 +1,23 @@
 use alto_actions::transfer::{Transfer, TransferError};
 use alto_storage::database::Database;
 use alto_storage::hashmap_db::HashmapDatabase;
+use alto_storage::transactional_db::TransactionalDb;
+use alto_storage::state_db::StateDb;
 use alto_types::account::Balance;
-use alto_types::Address;
+use alto_types::address::Address;
 
 const TEST_FAUCET_ADDRESS: &[u8] = b"0x0123456789abcdef0123456789abcd";
 const TEST_FAUCET_BALANCE: Balance = 10_000_000;
 
+// TODO: figure out vm file
 struct VM {
-    state_db: Box<dyn Database>,
+    state_db: Box<dyn TransactionalDb>,
 }
 
 impl VM {
     pub fn new() -> Self {
         Self {
-            state_db: Box::new(HashmapDatabase::new()),
+            state_db: Box::new(StateDb::new(Box::new(()))),
         }
     }
 
