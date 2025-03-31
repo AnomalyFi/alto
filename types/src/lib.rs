@@ -19,6 +19,7 @@ use rand::rngs::OsRng;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
+pub const TX_NAMESPACE:&[u8] = b"_tx_namespace_";
 pub const P2P_NAMESPACE: &[u8] = b"_ALTO_P2P";
 pub const SEED_NAMESPACE: &[u8] = b"_ALTO_SEED";
 pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
@@ -29,6 +30,8 @@ const ADDRESSLEN: usize = 32;
 
 type PublicKey = commonware_cryptography::ed25519::PublicKey;
 type PrivateKey = commonware_cryptography::ed25519::PrivateKey;
+type Signature = commonware_cryptography::ed25519::Signature;
+
 
 pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
     let mut rng = OsRng;
@@ -144,7 +147,7 @@ mod tests {
         let parent_digest = hash(&[0; 32]);
         let height = 0;
         let timestamp = 1;
-        let block = Block::new(parent_digest, height, timestamp);
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
         let block_digest = block.digest();
 
         // Check block serialization
@@ -154,6 +157,7 @@ mod tests {
         assert_eq!(block.parent, deserialized.parent);
         assert_eq!(block.height, deserialized.height);
         assert_eq!(block.timestamp, deserialized.timestamp);
+        // @todo add deserialization checks for signed transactions.
 
         // Create notarization
         let view = 0;
@@ -195,7 +199,7 @@ mod tests {
         let parent_digest = hash(&[0; 32]);
         let height = 0;
         let timestamp = 1;
-        let block = Block::new(parent_digest, height, timestamp);
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0;32].into());
 
         // Create notarization
         let view = 0;

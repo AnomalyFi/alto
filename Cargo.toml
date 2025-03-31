@@ -25,6 +25,7 @@ commonware-runtime = { version = "0.0.40" }
 commonware-storage = { version = "0.0.40" }
 commonware-stream = { version = "0.0.40" }
 commonware-utils = { version = "0.0.40" }
+commonware-codec = { version = "0.0.40"}
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

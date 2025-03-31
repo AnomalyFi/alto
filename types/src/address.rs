@@ -1,5 +1,5 @@
 use more_asserts::assert_le;
-use crate::ADDRESSLEN;
+use crate::{PublicKey, ADDRESSLEN};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct Address(pub [u8;ADDRESSLEN]);
@@ -9,6 +9,14 @@ impl Address {
         assert_le!(slice.len(), ADDRESSLEN, "address slice is too large");
         let mut arr = [0u8; ADDRESSLEN];
         arr[..slice.len()].copy_from_slice(slice);
+        Address(arr)
+    }
+
+    pub fn from_pub_key(pub_key: &PublicKey) -> Self {
+        // @todo implement a hasher to derive the address from the public key.
+        assert_le!(pub_key.len(), ADDRESSLEN, "public key is too large");
+        let mut arr = [0u8; ADDRESSLEN];
+        arr[..pub_key.len()].copy_from_slice(pub_key.as_ref());
         Address(arr)
     }
 

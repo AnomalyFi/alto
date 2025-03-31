@@ -85,18 +85,28 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
-        let genesis = Block::new(genesis_parent, 0, 0);
+        let genesis_state_root  = [0u8;32];
+        let genesis = Block::new(genesis_parent, 0, 0, Vec::new(), genesis_state_root.into());
         let genesis_digest = genesis.digest();
+        // --> prepared the genesis digest. 
+
+        // there are no blocks built, while genesis.
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
-
+        // @todo initiate fee manager here.
+        // @todo get the state view. 
+        // @todo init the database.
+        // @todo commit to database.
         while let Some(message) = self.mailbox.next().await {
             match message {
+                // return the genesis digest
                 Message::Genesis { response } => {
                     // Use the digest of the genesis message as the initial
                     // payload.
                     let _ = response.send(genesis_digest.clone());
                 }
+                // its this validators turn to propose the block. 
+                // So, it should check for available blocks and propose a block.
                 Message::Propose {
                     view,
                     parent,
@@ -125,7 +135,12 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     if current <= parent.timestamp {
                                         current = parent.timestamp + 1;
                                     }
-                                    let block = Block::new(parent.digest(), parent.height+1, current);
+                                    // fetch transactions from mempool. 
+                                    // serialize the transactions fetched from mempool into a vec<u8>.
+                                    // execute the transactions and get the result?
+                                    let txs = Vec::new();
+                                    let dummy_state_root = [0u8;32];
+                                    let block = Block::new(parent.digest(), parent.height+1, current, txs, dummy_state_root.into());
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();
@@ -199,6 +214,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         let _ = response.send(false);
                                         return;
                                     }
+                                    //@todo unmarshall txs, execute txs, generate state root, collect fees, build state root, verify state root. 
 
                                     // Persist the verified block
                                     syncer.verified(view, block).await;
@@ -231,6 +247,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let finalization = Finalization::new(view, parent, payload, signature.into());
                     let seed = Seed::new(view, seed.into());
 
+                    // @todo syncer does the heavy lifting of post finalization processing.
                     // Send the finalization to the syncer
                     syncer.finalized(finalization, seed).await;
                 }

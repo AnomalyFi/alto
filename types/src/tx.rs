@@ -1,13 +1,14 @@
+use commonware_cryptography::sha256::Digest;
+
 use crate::address::Address;
 use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;
 use crate::state::State;
-
+// use std::fmt::Debug;
 pub enum UnitType {
     Transfer,
     SequencerMsg,
 }
-
 
 pub struct UnitContext {
     pub timestamp: u64, // timestamp of the tx.
@@ -15,9 +16,21 @@ pub struct UnitContext {
     pub sender: Address, // sender of the tx.
 }
 
+pub trait UnitClone {
+    fn clone_box(&self) -> Box<dyn Unit>;
+}
+
+impl<T> UnitClone for T
+where
+    T: 'static + Unit + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Unit> {
+        Box::new(self.clone())
+    }
+}
 
 // unit need to be simple and easy to be packed in the tx and executed by the vm.
-pub trait Unit : Send + Sync {
+pub trait Unit : UnitClone + Send + Sync + std::fmt::Debug  {
     fn unit_type(&self) -> UnitType;
     fn encode(&self) -> Vec<u8>;
     fn decode(&mut self, bytes: &[u8]);
@@ -29,9 +42,14 @@ pub trait Unit : Send + Sync {
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>>;
 }
 
+impl Clone for Box<dyn Unit> {
+    fn clone(&self) -> Box<dyn Unit> {
+        self.clone_box()
+    }
+}
 
-// pub struct Tx<'a, U: Unit> {
-pub struct Tx<'a> {
+#[derive(Clone, Debug)]
+pub struct Tx {
     // timestamp of the tx creation. set by the user.
     // will be verified if the tx is in the valid window once received by validators.
     // if the timestamp is not in the valid window, the tx will be rejected.
@@ -49,13 +67,12 @@ pub struct Tx<'a> {
 
 
     // id is the transaction id. It is the hash of digest.
-    id: &'a [u8;32],
+    id: Digest,
     // digest is encoded tx.
     digest: Vec<u8>,
 }
 
-
-pub trait TxChars {
+pub trait TxMethods {
     // init is used to create a new instance of Tx.
     fn init() -> Self;
     // new is used to create a new instance of Tx with given units and chain id.
@@ -75,4 +92,38 @@ pub trait TxChars {
 
 
     fn decode(bytes: &[u8]) -> Self;
+}
+
+impl TxMethods for Tx {
+    fn init() -> Self {
+        todo!()
+    }
+
+    fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self {
+        todo!()
+    }
+
+    fn set_fee(&mut self, max_fee: u64, priority_fee: u64) {
+        todo!()
+    }
+
+    fn sign(&self, wallet: Wallet) -> SignedTx {
+        todo!()
+    }
+
+    fn id(&self) -> &[u8;32] {
+        todo!()
+    }
+
+    fn digest(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn encode(&mut self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn decode(bytes: &[u8]) -> Self {
+        todo!()
+    }
 }
