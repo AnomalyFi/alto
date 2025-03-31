@@ -1,7 +1,7 @@
 use crate::{Finalization, Notarization};
-use crate::signed_tx::{SignedTx, pack_signed_txs, unpack_signed_txs};
+use crate::signed_tx::{SignedTx, pack_signed_txs, unpack_signed_txs, SignedTxChars};
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{bls12381::PublicKey, sha256, sha256::Digest, Hasher, Sha256};
 use commonware_utils::{Array, SizedSerialize};
 
 // @todo add state root, fee manager and results to the block struct. 
@@ -92,6 +92,23 @@ impl Block {
 
     pub fn digest(&self) -> Digest {
         self.digest.clone()
+    }
+    //todo check logic below
+    pub fn encode(&mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(&self.parent);
+        bytes.extend_from_slice(&(self.height.to_be_bytes()));
+        bytes.extend_from_slice(&(self.timestamp.to_be_bytes()));
+        bytes.extend_from_slice(self.raw_txs.as_slice());
+        bytes.extend_from_slice(&self.state_root);
+        // encoding signed txs
+        for tx in self.txs.iter_mut() {
+            bytes.extend_from_slice(&tx.encode());
+        }
+
+        // return encoded digest.
+        self.digest = sha256::hash(&bytes);
+        bytes
     }
 }
 

@@ -1,4 +1,5 @@
 use more_asserts::assert_le;
+use rand::Rng;
 use crate::{PublicKey, ADDRESSLEN};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -9,6 +10,12 @@ impl Address {
         assert_le!(slice.len(), ADDRESSLEN, "address slice is too large");
         let mut arr = [0u8; ADDRESSLEN];
         arr[..slice.len()].copy_from_slice(slice);
+        Address(arr)
+    }
+
+    pub fn create_random_address() -> Self {
+        let mut arr = [0u8; ADDRESSLEN];
+        rand::thread_rng().fill(&mut arr);
         Address(arr)
     }
 

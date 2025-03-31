@@ -1,3 +1,4 @@
+use std::any::Any;
 use commonware_cryptography::sha256;
 use commonware_cryptography::sha256::Digest;
 
@@ -60,6 +61,8 @@ pub trait Unit : UnitClone + Send + Sync + std::fmt::Debug  {
         context: &UnitContext,
         state: &mut Box<dyn State>,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>>;
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl Clone for Box<dyn Unit> {
@@ -87,9 +90,9 @@ pub struct Tx {
 
 
     // id is the transaction id. It is the hash of digest.
-    id: Digest,
+    pub id: Digest,
     // digest is encoded tx.
-    digest: Vec<u8>,
+    pub digest: Vec<u8>,
 }
 
 pub trait TxMethods:Sized {
@@ -214,7 +217,7 @@ impl TxMethods for Tx {
         if units.is_err() {
             return Err(format!("Failed to unpack units: {}", units.unwrap_err()));
         }
-        tx.units = units.unwrap();
+        tx.units = units?;
         // generate tx id.
         tx.id = sha256::hash(&tx.digest);
         // return transaction.
@@ -264,7 +267,7 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
         if unit_type.is_err() {
             return Err(format!("Invalid unit type: {}", unit_type.unwrap_err()));
         }
-        let unit_type = unit_type.unwrap();
+        let unit_type = unit_type?;
         let unit:Box<dyn Unit> = match unit_type {
             UnitType::Transfer => {
                 let mut transfer = units::transfer::Transfer::default();
@@ -285,3 +288,62 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
 
 
 // @todo implement tests for encoding and decoding of tx.
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use more_asserts::assert_gt;
+    use crate::curr_timestamp;
+    use crate::units::transfer::Transfer;
+    use super::*;
+
+    #[test]
+    fn test_encode_decode() -> Result<(), Box<dyn Error>> {
+        let timestamp = curr_timestamp();
+        let max_fee = 100;
+        let priority_fee = 75;
+        let chain_id = 45205;
+        let transfer = Transfer::new();
+        let units : Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let mut digest: [u8; 32] = [0; 32];
+        let id = Digest::from(digest.clone());
+        // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
+        // shouldn't encode be able to encode without changing the msg?
+        let mut origin_msg = Tx {
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            units: units.clone(),
+            id,
+            digest: digest.to_vec(),
+        };
+        let encoded_bytes = origin_msg.encode();
+        assert_gt!(encoded_bytes.len(), 0);
+        let mut decoded_msg = Tx::decode(&encoded_bytes)?;
+        let origin_transfer = origin_msg.units[0]
+            .as_ref()
+            .as_any()
+            .downcast_ref::<Transfer>()
+            .expect("Failed to downcast to Transfer");
+
+        let decode_transfer = decoded_msg.units[0]
+            .as_ref()
+            .as_any()
+            .downcast_ref::<Transfer>()
+            .expect("Failed to downcast to Transfer");
+
+        assert_eq!(origin_msg.timestamp, decoded_msg.timestamp);
+        assert_eq!(origin_msg.max_fee, decoded_msg.max_fee);
+        assert_eq!(origin_msg.priority_fee, decoded_msg.priority_fee);
+        assert_eq!(origin_msg.chain_id, decoded_msg.chain_id);
+        assert_eq!(origin_msg.id, decoded_msg.id);
+        assert_eq!(origin_msg.digest, decoded_msg.digest);
+
+        // units
+        assert_eq!(origin_transfer.to_address, decode_transfer.to_address);
+        assert_eq!(origin_transfer.from_address, decode_transfer.from_address);
+        assert_eq!(origin_transfer.value, decode_transfer.value);
+        assert_eq!(origin_transfer.memo, decode_transfer.memo);
+        Ok(())
+    }
+}

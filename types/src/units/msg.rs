@@ -1,3 +1,4 @@
+use std::any::Any;
 use crate::{address::Address, tx::{Unit, UnitType, UnitContext}, state::State};
 
 #[derive(Clone, Debug)]
@@ -6,6 +7,17 @@ pub struct SequencerMsg {
     pub data: Vec<u8>,
     pub from_address: Address,
     pub relayer_id: u64,
+}
+
+impl SequencerMsg {
+    pub fn new() -> SequencerMsg {
+        Self {
+            chain_id: 0,
+            data: Vec::new(),
+            from_address: Address::empty(),
+            relayer_id: 0,
+        }
+    }
 }
 
 impl Unit for SequencerMsg {
@@ -47,6 +59,10 @@ impl Unit for SequencerMsg {
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         todo!()
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl Default for SequencerMsg {
@@ -57,5 +73,36 @@ impl Default for SequencerMsg {
             from_address: Address::empty(),
             relayer_id: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use more_asserts::assert_gt;
+    use super::*;
+
+    #[test]
+    fn test_encode_decode() -> Result<(), Box<dyn Error>> {
+        let chain_id = 4502;
+        let data = vec!(0xDE, 0xAD, 0xBE, 0xEF);
+        let from_address = Address::create_random_address();
+        let relayer_id = 1;
+        let origin_msg = SequencerMsg {
+            chain_id,
+            data,
+            from_address,
+            relayer_id,
+        };
+        let encoded_bytes = origin_msg.encode();
+        assert_gt!(encoded_bytes.len(), 0);
+        let mut decoded_msg = SequencerMsg::new();
+        decoded_msg.decode(&encoded_bytes);
+        assert_eq!(origin_msg.chain_id, decoded_msg.chain_id);
+        assert_eq!(origin_msg.data.len(), decoded_msg.data.len());
+        assert_eq!(origin_msg.data, decoded_msg.data);
+        assert_eq!(origin_msg.from_address, decoded_msg.from_address);
+        assert_eq!(origin_msg.relayer_id, decoded_msg.relayer_id);
+        Ok(())
     }
 }

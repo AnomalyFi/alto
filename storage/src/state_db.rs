@@ -101,7 +101,7 @@ mod tests {
         StateDb::new(Box::new(db))
     }
     #[test]
-    fn test_rocks_db_accounts() {
+    fn test_statedb_accounts() {
         let mut state_db = setup_state_db();
 
         let mut account = Account::new();

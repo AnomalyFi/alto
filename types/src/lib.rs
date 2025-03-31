@@ -2,7 +2,9 @@
 
 mod block;
 
+use std::time::SystemTime;
 use commonware_cryptography::{Ed25519, Scheme};
+use commonware_utils::SystemTimeExt;
 pub use block::{Block, Finalized, Notarized};
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
@@ -41,6 +43,10 @@ pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
     let private_key = keypair.private_key();
 
     (public_key, private_key)
+}
+
+pub fn curr_timestamp() -> u64 {
+    SystemTime::now().epoch_millis()
 }
 
 #[cfg(test)]
