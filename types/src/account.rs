@@ -30,6 +30,7 @@ impl Account {
         }
     }
 }
+
 impl Codec for Account {
     fn write(&self, writer: &mut impl Writer) {
         writer.write_bytes(self.address.0.as_slice());

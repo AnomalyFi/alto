@@ -1,9 +1,7 @@
 use std::error::Error;
 use rocksdb::{DB, Options};
-use commonware_codec::{Codec};
 use crate::database::Database;
 use std::path::Path;
-use bytes::{BufMut};
 use tempfile::TempDir;
 
 const SAL_ROCKS_DB_PATH: &str = "rocksdb";
@@ -22,7 +20,7 @@ impl RocksDbDatabase {
         opts.create_if_missing(true);
 
         let db_path = Path::new(path);
-        let db = DB::open(&opts, &db_path)?;
+        let db = DB::open(&opts, db_path)?;
         Ok(RocksDbDatabase { db })
     }
 

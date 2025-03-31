@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::error::Error;
-use alto_types::state::State;
 use crate::database::Database;
 
 const ACCOUNT_KEY_TYPE: u8 = 0;
@@ -77,7 +76,7 @@ impl TransactionalDb for InMemoryCachingTransactionalDb {
 
     fn commit(&mut self) -> Result<(), Box<dyn Error>> {
         for (key, value) in self.touched.iter() {
-            self.cache.insert(key.clone(), value.clone());
+            self.cache.insert(*key, value.clone());
             //TODO: what to do if an intermediary operation fails maybe use rocks db transact?
             // ex: what if we go through half of touched and it fails halfway? rare but possible.
             self.db.put(&key[..], value)?;
@@ -101,13 +100,13 @@ impl Database for InMemoryCachingTransactionalDb {
     fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         match self.get_from_cache(&Key::try_from(key).unwrap()) {
             Ok(Some(value)) => {
-                Ok(Some(value.into()))
+                Ok(Some(value))
             },
             Ok(None) => {
                 match self.db.get(key) {
                     Ok(Some(value)) => {
                         self.cache.insert(Key::try_from(key).unwrap(), value.clone());
-                        Ok(Some(value.into()))
+                        Ok(Some(value))
                     }
                     Ok(None) => {
                         Ok(None)

@@ -1,11 +1,10 @@
 use crate::database::Database;
-use crate::transactional_db::{TransactionalDb,InMemoryCachingTransactionalDb};
+use crate::transactional_db::TransactionalDb;
 use alto_types::account::{Account, Balance};
 use alto_types::address::Address;
 use bytes::Bytes;
 use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
-use crate::rocks_db::RocksDbDatabase;
 
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
@@ -90,6 +89,9 @@ impl Database for StateDb {
 mod tests {
     use alto_types::address::Address;
     use alto_types::account::Account;
+    use crate::rocks_db::RocksDbDatabase;
+    use crate::transactional_db::InMemoryCachingTransactionalDb;
+
     use super::*;
 
     fn setup_state_db() -> StateDb {

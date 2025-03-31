@@ -108,7 +108,7 @@ impl WalletMethods for Wallet {
         self.priv_key.as_ref().to_vec()
     }
 
-    fn store_private_key(&self, path: &str) -> Result<(), Error> {
+    fn store_private_key(&self, _path: &str) -> Result<(), Error> {
         todo!()
     }
 

@@ -1,11 +1,9 @@
 use std::io;
 use axum::response::IntoResponse;
-use axum::routing::get;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use rand::Rng;
 use tokio::net::TcpListener;
 use tracing::{event, Level};
-use crate::actors::syncer;
 
 pub struct RouterConfig {
     port: i32,
@@ -69,13 +67,13 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
         "Submit block"
     }
 
-    // fn init_router(&mut self) {
+    fn init_router(&mut self) {
     //     let router = axum::Router::new()
     //         .route("/", get(Router::handle_default))
     //         .route(Router::PATH_SUBMIT_BLOCK, get(Router::handle_submit_block()));
     //
     //     self.router = Some(router)
-    // }
+    }
 
     async fn serve(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let listener = self.listener.take().ok_or("serve failed because listener is None");

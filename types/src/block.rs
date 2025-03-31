@@ -1,5 +1,3 @@
-use std::os::macos::raw::{self, stat};
-
 use crate::{Finalization, Notarization};
 use crate::signed_tx::{SignedTx, pack_signed_txs, unpack_signed_txs};
 use bytes::{Buf, BufMut};

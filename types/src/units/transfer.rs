@@ -2,7 +2,6 @@ use crate::address::Address;
 use crate::state::State;
 use crate::tx::{Unit, UnitType, UnitContext};
 
-use super::msg::SequencerMsg;
 const MAX_MEMO_SIZE: usize = 256;
 
 #[derive(Debug, Clone)]

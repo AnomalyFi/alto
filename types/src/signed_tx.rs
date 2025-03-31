@@ -121,7 +121,7 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
     let signed_txs_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
     let mut signed_txs = Vec::with_capacity(signed_txs_len as usize);
     let mut offset = 8;
-    for i in 0..signed_txs_len {
+    for _ in 0..signed_txs_len {
         let signed_tx_len = u64::from_be_bytes(bytes[offset..offset + 8].try_into().unwrap());
         offset += 8;
         let signed_tx_bytes = &bytes[offset..offset + signed_tx_len as usize];

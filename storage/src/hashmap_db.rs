@@ -6,6 +6,12 @@ pub struct HashmapDatabase {
     data: HashMap<String, String>,
 }
 
+impl Default for HashmapDatabase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HashmapDatabase {
     pub fn new() -> Self {
         Self {
