@@ -4,7 +4,6 @@ use commonware_cryptography::ed25519::Ed25519;
 use commonware_cryptography::Scheme;
 use rand::{CryptoRng, Rng};
 use std::fmt::Error;
-use std::path;
 
 #[derive(Clone, Debug)]
 pub enum AuthTypes {
@@ -66,8 +65,8 @@ impl WalletMethods for Wallet {
         Self { 
             priv_key: signer.private_key(), 
             pub_key: signer.public_key(), 
-            address: address, 
-            signer: signer,
+            address, 
+            signer,
         }
     }
 
@@ -78,7 +77,7 @@ impl WalletMethods for Wallet {
             priv_key: signer.private_key(),
             pub_key: signer.public_key(),
             address: Address::from_pub_key(&signer.public_key()),
-            signer: signer,
+            signer,
         }
     }
 
@@ -88,9 +87,10 @@ impl WalletMethods for Wallet {
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool, commonware_cryptography::Error> {
         let signature = Signature::try_from(signature);
-        if signature.is_err() {
-            return Err(signature.unwrap_err());
+        if let Err(e) = signature {
+            return Err(e);
         }
+         
         let signature = signature.unwrap();
         let pub_key = self.signer.public_key();
         Ok(Ed25519::verify(Some(TX_NAMESPACE), data, &pub_key, &signature))

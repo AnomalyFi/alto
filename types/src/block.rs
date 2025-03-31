@@ -1,4 +1,3 @@
-use std::os::macos::raw::{self, stat};
 
 use crate::{Finalization, Notarization};
 use crate::signed_tx::{SignedTx, SignedTxChars};

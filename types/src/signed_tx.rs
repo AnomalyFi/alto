@@ -16,7 +16,7 @@ pub struct SignedTx {
 // function names are self explanatory.
 pub trait SignedTxChars {
     fn new(tx: Tx, pub_key: PublicKey, signature: Vec<u8>) -> Self;
-    fn sign(&mut self, wallet: Wallet) -> SignedTx;
+    // fn sign(&mut self, wallet: Wallet) -> SignedTx;
     fn verify(&mut self) -> bool;
     fn signature(&self) -> Vec<u8>;
     fn public_key(&self) -> Vec<u8>;
@@ -32,17 +32,7 @@ impl SignedTxChars for SignedTx {
             tx,
             pub_key: pub_key.clone(),
             address: Address::from_pub_key(&pub_key),
-            signature: signature,
-        }
-    }
-
-    fn sign(&mut self, mut wallet: Wallet) -> SignedTx {
-        let tx_data = self.tx.encode();
-        SignedTx {
-            tx: self.tx.clone(),
-            signature: wallet.sign(&tx_data),
-            address: wallet.address(),
-            pub_key: wallet.public_key(),
+            signature: signature.clone(),
         }
     }
 
@@ -74,5 +64,17 @@ impl SignedTxChars for SignedTx {
 
     fn decode(&self, bytes: &[u8]) -> Self {
         todo!()
+    }
+}
+
+impl SignedTx {
+    pub fn sign(mut tx: Tx, mut wallet: Wallet) -> SignedTx {
+        let tx_data = tx.encode();
+        SignedTx {
+            tx: tx.clone(),
+            signature: wallet.sign(&tx_data),
+            address: wallet.address(),
+            pub_key: wallet.public_key(),
+        }
     }
 }
