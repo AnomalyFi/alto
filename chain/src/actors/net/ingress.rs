@@ -1,8 +1,12 @@
+use alto_types::Block;
 use bytes::Bytes;
 use commonware_cryptography::sha256::Digest;
 use futures::{channel::{mpsc, oneshot}, SinkExt};
 
 pub enum Message {
+    Block {
+        block: Block,
+    },
     SubmitTx {
         payload: Bytes,
         response: oneshot::Sender<Digest>
