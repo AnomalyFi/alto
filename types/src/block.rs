@@ -1,6 +1,7 @@
+use std::os::macos::raw::{self, stat};
 
 use crate::{Finalization, Notarization};
-use crate::signed_tx::{SignedTx, SignedTxChars};
+use crate::signed_tx::{SignedTx, pack_signed_txs, unpack_signed_txs};
 use bytes::{Buf, BufMut};
 use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Hasher, Sha256};
 use commonware_utils::{Array, SizedSerialize};
@@ -41,7 +42,9 @@ impl Block {
     }
 
     pub fn new(parent: Digest, height: u64, timestamp: u64, txs: Vec<SignedTx>, state_root: Digest) -> Self {
-        let raw_txs = txs.iter().flat_map(|tx| tx.encode()).collect::<Vec<u8>>();
+        // let mut txs = txs;
+        // @todo this is packing txs in a block.
+        let raw_txs = pack_signed_txs(txs.clone());
         let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
         Self {
             parent,
@@ -74,9 +77,10 @@ impl Block {
         let timestamp = bytes.get_u64();
         let state_root = Digest::read_from(&mut bytes).ok()?;
         let raw_txs = bytes.to_vec();
-        // Return block
         let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
-        let txs = Vec::new(); // @todo deserialze txs from raw_txs.
+        let txs = unpack_signed_txs(raw_txs.clone());
+        
+        // Return block
         Some(Self {
             parent,
             height,

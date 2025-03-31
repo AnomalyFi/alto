@@ -7,7 +7,6 @@ pub use block::{Block, Finalized, Notarized};
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
 pub mod wasm;
-pub mod codec;
 pub mod wallet;
 pub mod tx;
 pub mod signed_tx;
@@ -32,7 +31,6 @@ const ADDRESSLEN: usize = 32;
 type PublicKey = commonware_cryptography::ed25519::PublicKey;
 type PrivateKey = commonware_cryptography::ed25519::PrivateKey;
 type Signature = commonware_cryptography::ed25519::Signature;
-
 
 pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
     let mut rng = OsRng;

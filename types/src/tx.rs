@@ -106,8 +106,8 @@ pub trait TxMethods:Sized {
     // returns digest of the tx.
     fn digest(&self) -> Vec<u8>;
     // encodes the tx, writes to digest and returns the digest.
+    // ensure all fields are properly set before calling this function.
     fn encode(&mut self) -> Vec<u8>;
-
 
     fn decode(bytes: &[u8]) -> Result<Self, String>;
 }
@@ -169,7 +169,7 @@ impl TxMethods for Tx {
     }
 
     fn encode(&mut self) -> Vec<u8> {
-        if self.digest.len() > 0 {
+        if self.digest.is_empty() {
             return self.digest.clone();
         }
         // pack tx timestamp.
@@ -201,7 +201,7 @@ impl TxMethods for Tx {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() == 0 {
+        if bytes.is_empty() {
             return Err("Empty bytes".to_string());
         }
         let mut tx = Self::default();
