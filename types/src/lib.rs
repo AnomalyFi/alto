@@ -14,7 +14,7 @@ pub mod signed_tx;
 pub mod state;
 pub mod address;
 pub mod account;
-pub mod actions;
+pub mod units;
 
 use rand::rngs::OsRng;
 

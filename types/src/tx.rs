@@ -1,7 +1,7 @@
 use commonware_cryptography::sha256;
 use commonware_cryptography::sha256::Digest;
 
-use crate::actions;
+use crate::units;
 use crate::address::Address;
 use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;
@@ -210,7 +210,14 @@ impl TxMethods for Tx {
         tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());  
         tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
         tx.chain_id = u64::from_be_bytes(bytes[24..32].try_into().unwrap());
-        unpack_units(&bytes[32..]);
+        let units = unpack_units(&bytes[32..]);
+        if units.is_err() {
+            return Err(format!("Failed to unpack units: {}", units.unwrap_err()));
+        }
+        tx.units = units.unwrap();
+        // generate tx id.
+        tx.id = sha256::hash(&tx.digest);
+        // return transaction.
         Ok(tx)
     }
 }
@@ -260,12 +267,12 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
         let unit_type = unit_type.unwrap();
         let unit:Box<dyn Unit> = match unit_type {
             UnitType::Transfer => {
-                let mut transfer = actions::transfer::Transfer::default();
+                let mut transfer = units::transfer::Transfer::default();
                 transfer.decode(&unit_bytes);
                 Box::new(transfer)
             }
             UnitType::SequencerMsg => {
-                let mut msg = actions::msg::SequencerMsg::default();
+                let mut msg = units::msg::SequencerMsg::default();
                 msg.decode(&unit_bytes);
                 Box::new(msg)
             }

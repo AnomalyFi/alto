@@ -1,6 +1,8 @@
 use crate::address::Address;
 use crate::state::State;
 use crate::tx::{Unit, UnitType, UnitContext};
+
+use super::msg::SequencerMsg;
 const MAX_MEMO_SIZE: usize = 256;
 
 #[derive(Debug, Clone)]
@@ -24,15 +26,32 @@ pub enum TransferError {
 
 impl Unit for Transfer {
     fn unit_type(&self) -> UnitType {
-        todo!()
+        UnitType::Transfer
     }
 
     fn encode(&self) -> Vec<u8> {
-        todo!()
+        let mut bytes = Vec::new();
+        let memo_len = self.memo.len() as u64;
+        bytes.extend_from_slice(self.from_address.as_slice());
+        bytes.extend_from_slice(self.to_address.as_slice());
+        bytes.extend(self.value.to_be_bytes());
+        bytes.extend(memo_len.to_be_bytes());
+        if memo_len > 0 {
+            bytes.extend_from_slice(&self.memo);
+        }
+        
+        bytes
     }
 
+    // @todo introduce syntactic checks.
     fn decode(&mut self, bytes: &[u8]) {
-        todo!()
+        self.from_address = Address::from_bytes(&bytes[0..32]).unwrap();
+        self.to_address = Address::from_bytes(&bytes[32..64]).unwrap();
+        self.value = u64::from_be_bytes(bytes[64..72].try_into().unwrap());
+        let memo_len = u64::from_be_bytes(bytes[72..80].try_into().unwrap());
+        if memo_len > 0 {
+            self.memo = bytes[80..(80 + memo_len as usize)].to_vec();
+        }
     }
 
     fn apply(
