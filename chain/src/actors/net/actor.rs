@@ -38,7 +38,6 @@ type SharedState<R: Rng + Spawner + Metrics + Clock> = Arc<RwLock<AppState<R>>>;
 #[derive(Clone)]
 struct AppState<R: Rng + Spawner + Metrics + Clock>   {
     context: R,
-    mailbox: Mailbox,
     clients: Clients,
     block_listeners: Arc<RwLock<HashSet<ClientID>>>,
     tx_listeners: Arc<RwLock<HashSet<ClientID>>>
@@ -73,7 +72,6 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
 
         let state = AppState::<R> {
             context: context.with_label("app_state"),
-            mailbox: mailbox.clone(),
             clients: Arc::new(RwLock::new(HashMap::new())),
             block_listeners: Arc::new(RwLock::new(HashSet::new())),
             tx_listeners: Arc::new(RwLock::new(HashSet::new())),
