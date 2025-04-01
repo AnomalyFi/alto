@@ -6,6 +6,7 @@ use thiserror::Error;
 
 pub mod consensus;
 pub mod utils;
+mod client;
 
 const LATEST: &str = "latest";
 
