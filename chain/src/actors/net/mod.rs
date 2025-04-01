@@ -1,6 +1,5 @@
-pub mod router;
-pub mod ingress;
 pub mod actor;
+pub mod ingress;
 
 #[cfg(test)]
 mod tests {
@@ -15,33 +14,24 @@ mod tests {
     use commonware_macros::{test_async, test_traced};
     use commonware_runtime::{tokio::{self, Context, Executor}, Clock, Metrics, Runner, Spawner};
     use futures::{channel::mpsc, future::join_all, SinkExt, StreamExt};
-    use tokio_tungstenite::{connect_async, tungstenite::Message as WsClientMessage};
+    use tokio_tungstenite::{connect_async, tungstenite::{client, Message as WsClientMessage}};
     use tower::ServiceExt;
     use tracing_subscriber::field::debug;
 
-    use crate::actors::net::router::decode_router_message;
+    use crate::actors::net::ingress::WebsocketClientMessage;
 
-    use super::{actor::Actor, ingress::Mailbox, router::{self, RouterMessage}};
+    use super::{actor::Actor, ingress::Message, actor::{self}};
     use tracing::debug;
 
     #[test_traced]
     fn test_msg() {
         let (runner, mut context) = Executor::init(tokio::Config::default());
         runner.start(async move {
-            let (actor, mailbox) = Actor::new();
-
-            context.with_label("net_actor").spawn(|_| {
-                actor.run()
+            let (actor, mailbox) = Actor::new(context, actor::Config {
+                port: 7890
             });
 
-            let (app, _) = router::Router::new(
-                context.with_label("net_router"), 
-                router::RouterConfig {
-                    port: 7890,
-                    mailbox
-            });
-
-            let Some(router) = app.router else {
+            let Some(router) = actor.router else {
                 panic!("router not initalized");
             };
 
@@ -68,21 +58,12 @@ mod tests {
     fn test_ws() {
         let (runner, mut context) = Executor::default();
         runner.start(async move {
-            let (actor, actor_mailbox) = Actor::new();
-
-            context.with_label("net_actor").spawn(|_| {
-                actor.run()
-            });
-
-            let (app, mut router_mailbox) = router::Router::new(
-                context.with_label("net_router"), 
-                router::RouterConfig {
-                    port: 7890,
-                    mailbox: actor_mailbox
+            let (actor, mut mailbox) = Actor::new(context.with_label("router"), actor::Config {
+                port: 7890
             });
 
             debug!("starting router");
-            let app_handler = app.start().await;
+            let app_handler = actor.start().await;
 
             debug!("launching ws client");
             // instantiate websocket client listening block
@@ -90,16 +71,22 @@ mod tests {
             let (ws_stream, response) = connect_async(url).await.expect("Failed to connect");
             assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
 
-            let (_, mut read) = ws_stream.split();
+            let (mut write, mut read) = ws_stream.split();
+            // register block
+            let _ = write.send(WsClientMessage::binary(WebsocketClientMessage::RegisterBlock.serialize())).await;
+
+            // listening block
             let client_handler = context.with_label("ws_client").spawn(async move |_| {
                 while let Ok(msg) =  read.next().await.unwrap() {
                     match msg {
                         WsClientMessage::Binary(bin) => {
-                            match decode_router_message(bin.into()).unwrap() {
-                                RouterMessage::Block { block } => {
-                                    debug!(?block, "received a block from server");
+                            let msg = Message::deserialize(&bin).unwrap();
+                            match msg {
+                                Message::PublishBlock { block } => {
+                                    print!("received a block from server: {:?}", block);
                                     return;
-                                } }
+                                }
+                            }
                         } ,
                         _ => {
                             debug!("unknown message")
@@ -114,11 +101,11 @@ mod tests {
             let height = 0;
             let timestamp = 1;
             let block = Block::new(parent_digest, height, timestamp);
-            router_mailbox.broadcast_block(block).await;
+            mailbox.broadcast_block(block).await;
 
             context.sleep(Duration::from_millis(1000)).await;
 
-            // join_all(vec![app_handler]).await;
+            join_all(vec![client_handler]).await;
         })
     }
 }

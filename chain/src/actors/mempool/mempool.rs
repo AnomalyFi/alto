@@ -139,10 +139,10 @@ impl<D: Digest> RawTransaction<D>
     }
 }
 
-impl<D: Digest> From<net::router::DummyTransaction> for RawTransaction<D> 
+impl<D: Digest> From<net::actor::DummyTransaction> for RawTransaction<D> 
     where Sha256: Hasher<Digest = D>
 {
-    fn from(value: net::router::DummyTransaction) -> Self {
+    fn from(value: net::actor::DummyTransaction) -> Self {
         let raw = Bytes::from(value.payload);
         RawTransaction::new(raw)
     }
