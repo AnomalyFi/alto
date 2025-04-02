@@ -9,10 +9,13 @@ use std::error::Error;
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
+// @todo state db will be a wrapper around a db implementing trait TransactionalDb. 
+// state db interface will be provided for every transaction. 
+// db implementing TransactionalDb will be changed for every block and has an ability to rollback over reverted transactions.
 pub struct StateDb {
     db: Box<dyn TransactionalDb>,
 }
-// can use like a redis from Arcadia like get and set for diff types?
+
 impl StateDb {
     pub fn new(db: Box<dyn TransactionalDb>) -> StateDb {
         StateDb { db }

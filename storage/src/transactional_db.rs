@@ -1,87 +1,199 @@
 use std::collections::HashMap;
 use std::error::Error;
-use crate::database::Database;
 
-const ACCOUNT_KEY_TYPE: u8 = 0;
+use crate::database::Database;
+use std::sync::Arc;
 
 type Key = [u8; 33];
+// @todo rewrite InMemoryCachingTransactionalDb, to implement rollback and tracking state changes properly. 
+// carrying forward the cached transactions among others.
 
-// pub enum OpAction {
-//     Read, // key was read
-//     Create, // key was created
-//     Update, // key was updated
-//     Delete, // key got deleted
-// }
+// i. should track every operation, that a tx does.
+// ii. should be able to rollback if a tx reverts.
+// iii. should be able to rollback if a block forks.
+// iv. should be able to commit to all the state changes once a block has been accepted.
 
-// pub struct Op<'a>{
-//     pub action: crate::tx_state_view::OpAction,
-//     pub key: Key<'a>,
-//     pub value: Vec<u8>,
-// }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OpAction {
+    // key is read
+    Read, 
+    // key is created
+    Create, 
+    // key is updated
+    Update, 
+    // key got deleted
+    Delete, 
+}
 
-pub trait TransactionalDb : Database {
-    fn init_cache(&mut self, cache: HashMap<Key, Vec<u8>>); // initialize the cache with an already available hashmap of key-value pairs.
-    fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the cache. If the key is not in the cache, it will return an error.
-    fn get_from_db(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; // get a key from the underlying storage. If the key is not in the storage, it will return an error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Op{
+    pub action: OpAction,
+    pub value: Vec<u8>,
+}
+
+/// Implements finalization to database out of TransactionalDb trait.
+pub trait TransactionalDb<'a> {
+    // initialize the cache with an already available hashmap of key-value pairs.
+    fn init_cache(&mut self, cache: & 'a mut HashMap<Key, Op>);
+    // create a next instance.
+    // this is called only after calling commit_last_tx. 
+    // else, some of the key value pair changes get lost.
+    // fn next_instance(&mut self) -> Self;
+    /// get the value corresponding to the key. 
+    /// use this method for querying state.
+    fn get(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
+    // insert a key-pair. could be a create or delete action. 
+    // underlying struct should handle the OpAction part.
+    fn insert(&mut self, key: &Key, value: Vec<u8>) -> Result<(), Box<dyn Error>>;
+    // delete a key-pair
+    fn delete(&mut self, key: &Key) -> Result<(), Box<dyn Error>>;
+    // get a key from cache. do not call this method directly, instead call get.
+    fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
+    // get a key from the underlying storage. do not call this method directly, instead call get. If the key is not in the storage, it will return an error.
+    fn get_from_db(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; 
+    // commit last tx changes within the cache
+    fn commit_last_tx(&mut self) -> Result<(), Box<dyn Error>>;
+    // commit changes to the unfinalized map.
     fn commit(&mut self) -> Result<(), Box<dyn Error>>;
+    // rollback last tx changes within the cache.
+    fn rollback_last_tx(&mut self) -> Result<(), Box<dyn Error>>;
+    // rollback entirely.
     fn rollback(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
-pub struct InMemoryCachingTransactionalDb {
-    pub cache: HashMap<Key, Vec<u8>>, // key-value, state view cache before tx execution. This is not an exhaustive list of all state keys read/write during tx. If cache misses occur, the state view will read from the underlying storage.
-    // pub ops: Vec<crate::tx_state_view::Op<'a>>, // list of state ops applied.
-    pub touched: HashMap<Key, Vec<u8>>, // key-value pairs that were changed during tx execution. This is a subset of the cache.
-    pub db: Box<dyn Database>, // underlying state storage, to use when cache misses occur.
+pub struct InMemoryCachingTransactionalDb<'a> {
+    // cache is init'ed at the start.
+    pub cache: & 'a mut HashMap<Key, Op>,
+    // unfinalized changes from previous block(s).
+    pub unfinalized: & 'a mut HashMap<Key, Op>,
+    // set of all key value changes from last init. 
+    pub touched: HashMap<Key, Op>, 
+    // set of all key value changes from last commit_last_tx
+    pub touched_tx: HashMap<Key, Op>,
+    // underlying database.
+    pub db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>, 
 }
-impl InMemoryCachingTransactionalDb {
-    pub fn new(db: Box<dyn Database>) -> InMemoryCachingTransactionalDb {
+
+impl<'a> InMemoryCachingTransactionalDb<'a> {
+    pub fn new(cache: & 'a mut HashMap<Key, Op>, unfinalized: & 'a mut HashMap<Key, Op>, db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>) -> InMemoryCachingTransactionalDb<'a> {
         Self{
-            cache: HashMap::new(),
+            cache: cache,
+            unfinalized: unfinalized,
             touched: HashMap::new(),
+            touched_tx: HashMap::new(),
             db,
         }
     }
-    fn get_from_touched(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        self.touched.get(key).map_or(
-            Ok(None),
-            |v| Ok(Some(v.clone())))
-    }
 }
 
-impl TransactionalDb for InMemoryCachingTransactionalDb {
-    fn init_cache(&mut self, cache: HashMap<Key, Vec<u8>>) {
+impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
+    fn init_cache(&mut self, cache: & 'a mut HashMap<Key, Op>) {
         self.cache = cache;
     }
 
-    // get a key from the cache. If the key is not in the cache, it will return an error.
-    fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        // searches touched
-        if let Some(v) = self.get_from_touched(key)? {
-            return Ok(Some(v.clone()));
-        }
-        // searches cache
-        match self.cache.get(key) {
-            Some(cached_value) => {
-                Ok(Some(cached_value.clone()))
+    fn get(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        match self.touched_tx.get(key) {
+            // the key is used in the current transaction.
+            Some(op) => {
+                // No need to update the op.action as create, insert or delete are superior to read.
+                Ok(Some(op.value.clone()))
             }
-            // not found in either cache or db
-            None => Ok(None),
+            // key is not used in the current transaction.
+            None => {
+                match self.touched.get(key) {
+                    // key is used in the current block.
+                    Some(t_op) => {
+                        let v = Op { 
+                            action: OpAction::Read, 
+                            value:t_op.value.clone() 
+                        };
+                        self.touched_tx.insert(*key, v);
+                        Ok(Some(t_op.value.clone()))
+                    }
+                    // key is not used in the current block.
+                    None => {
+                        match self.unfinalized.get(key) {
+                            // the key is used in the previous block(s). but the blocks did nt finalze yet.
+                            Some(u_op) => {
+                                let v = Op { 
+                                    action: OpAction::Read, 
+                                    value:u_op.value.clone() 
+                                };
+                                self.touched_tx.insert(*key, v);
+                                return Ok(Some(u_op.value.clone()));
+                            }
+                            // the key is not used in the previous block(s).
+                            None => {
+                                // check if the key is in the cache.
+                                // if it is, return the value.
+                                // if it is not, check if the key is in the underlying db.
+                                // if it is, return the value.
+                                // if it is not, return an error.
+                                if let Some(f_c) = self.get_from_cache(key)
+                                .ok()
+                                .flatten()
+                                .or_else(|| self.db.lock().ok()?.get(key).ok().flatten())  {
+                                    let v = Op { 
+                                        action: OpAction::Read, 
+                                        value: f_c.clone() 
+                                    };
+                                    self.touched_tx.insert(*key, v);
+                                    return Ok(Some(f_c));
+                                } else {
+                                    return Err("Key does not exist.".into());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    // get a key from the underlying storage. If the key is not in the storage, it will return an error.
+    fn insert(&mut self, key: &Key, value: Vec<u8>) -> Result<(), Box<dyn Error>> {
+        let op = Op {
+            action: OpAction::Update, // @todo change this to OpAction::Update or OpAction::Create? based on if the key-pair actually exists.
+            value: value,
+        };
+        self.touched_tx.insert(*key, op);
+        Ok(())
+    }
+
+    fn delete(&mut self, key: &Key) -> Result<(), Box<dyn Error>> {
+        let op = Op{
+            action: OpAction::Delete,
+            value: vec![],
+        };
+        self.touched_tx.insert(*key, op);
+        Ok(())
+    }
+
+    fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        self.cache.get(key)
+            .map(|op| Some(op.value.clone()))
+            .ok_or_else(|| "Key not found in cache.".into())
+    }
+
     fn get_from_db(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        self.db.get(key)
+        self.db.lock().unwrap().get(key)
+            .map(|v| Some(v.clone()))?
+            .ok_or_else(|| "Key not found in db.".into())
+    }
+
+    fn commit_last_tx(&mut self) -> Result<(), Box<dyn Error>> {
+        merge_maps(&mut self.touched, &self.touched_tx);
+        self.touched_tx.clear();
+        Ok(())
     }
 
     fn commit(&mut self) -> Result<(), Box<dyn Error>> {
-        for (key, value) in self.touched.iter() {
-            self.cache.insert(*key, value.clone());
-            //TODO: what to do if an intermediary operation fails maybe use rocks db transact?
-            // ex: what if we go through half of touched and it fails halfway? rare but possible.
-            self.db.put(&key[..], value)?;
-        }
+        merge_maps(&mut self.unfinalized, &self.touched);
         self.touched.clear();
+        Ok(())
+    }
+
+    fn rollback_last_tx(&mut self) -> Result<(), Box<dyn Error>> {
+        self.touched_tx.clear();
         Ok(())
     }
 
@@ -91,93 +203,133 @@ impl TransactionalDb for InMemoryCachingTransactionalDb {
     }
 }
 
-impl Database for InMemoryCachingTransactionalDb {
-    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
-        self.touched.insert(Key::try_from(key).unwrap(), value.to_vec());
-        Ok(())
-    }
-
-    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        match self.get_from_cache(&Key::try_from(key).unwrap()) {
-            Ok(Some(value)) => {
-                Ok(Some(value))
-            },
-            Ok(None) => {
-                match self.db.get(key) {
-                    Ok(Some(value)) => {
-                        self.cache.insert(Key::try_from(key).unwrap(), value.clone());
-                        Ok(Some(value))
-                    }
-                    Ok(None) => {
-                        Ok(None)
-                    },
-                    Err(e) => {
-                        Err(e)
-                    }
-                }
-            },
-            Err(e) => {
-                Err(e)
+pub fn merge_maps<'a, 'b>(map1: & 'a mut HashMap<Key, Op>, map2: & 'b HashMap<Key, Op>) -> & 'a mut HashMap<Key, Op> {
+    for (key, op) in map2.iter() {
+        if let Some(existing_op) = map1.get(key) {
+            // there is a key existing in both maps.
+            if op.action == OpAction::Delete {
+                map1.insert(*key, op.clone());
+            
+            }else if op.action == OpAction::Update {
+                // if op.action is update, then update the map1. as update superseeds everything.
+                map1.insert(*key, op.clone());
+            }else if op.action == OpAction::Read && (existing_op.action == OpAction::Update || existing_op.action == OpAction::Create) {
+                // reading on a delete will return a nill value with existing op set to delete. this should not be an issue.
+                let new_op = Op {
+                    action: existing_op.action,
+                    value: op.value.clone(),
+                };
+                map1.insert(*key, new_op.clone());
             }
+        } else {
+            // there is a key not existing in the first map.
+            map1.insert(*key, op.clone());
         }
     }
-
-    // TODO: The below deletes in both cache and underlying db. Change later such that deletes must be committed.
-    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
-        self.touched.remove(key);
-        self.cache.remove(key);
-        self.db.delete(key)
-    }
+    map1
 }
 
 #[cfg(test)]
 mod tests {
     use crate::hashmap_db::HashmapDatabase;
     use super::*;
-
+    use std::sync::Mutex;
     #[test]
-    fn test_transactional_db_basic() {
-        let hash_db = HashmapDatabase::new();  // underlying store
-
-        let test_key1: [u8; 33] = [0; 33];
-        let test_value1 = b"test_value1".to_vec();
-
-        let test_key2: [u8; 33] = [1; 33];
-        let test_value2 = b"test_value2".to_vec();
-
-        let test_key3: [u8; 33] = [2; 33];
-        let test_value3 = b"test_value3".to_vec();
-
+    fn test_it_works() {
+        let mut cache: HashMap<Key, Op> = HashMap::new();
+        let mut unfinalized: HashMap<Key, Op> = HashMap::new();
+        let db = Arc::new(Mutex::new(HashmapDatabase::new()));
+        let key1 = [1; 33];
+        let value1 = [1; 33];
+        let key2 = [2; 33];
+        let value2 = [2; 33];
+        db.lock().unwrap().put(&key1, &value1).unwrap();
         {
-            let mut tx_db = InMemoryCachingTransactionalDb::new(Box::new(hash_db));
+            let mut in_mem_db = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db.clone());
 
-            // should add to cache but not underlying store db
-            tx_db.put(&test_key1, &test_value1).unwrap();
-            assert!(tx_db.get_from_db(&test_key1).unwrap().is_none());
-            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().is_some(), true);
-            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().unwrap(), test_value1);
-            assert_eq!(tx_db.get(&test_key1).unwrap().unwrap(), test_value1);
-
-            // commit the change. should be visible in underlying store.
-            tx_db.commit().unwrap();
-            assert!(tx_db.get_from_db(&test_key1).unwrap().is_some());
-            assert_eq!(tx_db.get_from_db(&test_key1).unwrap().unwrap(), test_value1);
-            assert_eq!(tx_db.get_from_cache(&test_key1).unwrap().unwrap(), test_value1);
-            assert_eq!(tx_db.get(&test_key1).unwrap().unwrap(), test_value1);
-
-            // add 2nd key-value. do not commit yet.
-            tx_db.put(&test_key2, &test_value2).unwrap();
-            assert!(tx_db.get_from_db(&test_key2).unwrap().is_none());
-            assert_eq!(tx_db.get_from_cache(&test_key2).unwrap().is_some(), true);
-            assert_eq!(tx_db.get_from_cache(&test_key2).unwrap().unwrap(), test_value2);
-            assert_eq!(tx_db.get(&test_key2).unwrap().unwrap(), test_value2);
-
-            // rollback and commit should make no changes to underlying.
-            tx_db.rollback().unwrap();
-            tx_db.commit().unwrap();
-            assert!(tx_db.get_from_db(&test_key2).unwrap().is_none());
-            assert!(tx_db.get_from_cache(&test_key2).unwrap().is_none());
-            assert!(tx_db.get(&test_key2).unwrap().is_none());
+            // start a tx
+            assert_eq!(in_mem_db.get(&key1).unwrap(), Some(value1.to_vec()));
+            // end a tx
+            assert_eq!(in_mem_db.touched_tx.len(), 1);
+            assert_eq!(in_mem_db.touched.len(),0);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.touched_tx.get(&key1).unwrap(), &Op{
+                action: OpAction::Read,
+                value: value1.to_vec(),
+            });
+            // commit the tx
+            let _ = in_mem_db.commit_last_tx();
+            assert_eq!(in_mem_db.touched_tx.len(), 0);
+            assert_eq!(in_mem_db.touched.len(),1);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.touched.get(&key1).unwrap(), &Op{
+                action: OpAction::Read,
+                value: value1.to_vec(),
+            });
+            // start a new tx
+            in_mem_db.insert(&key2, value2.to_vec()).unwrap();
+            assert_eq!(in_mem_db.touched_tx.len(), 1);
+            assert_eq!(in_mem_db.touched.len(), 1);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.touched_tx.get(&key2).unwrap(), &Op{
+                action: OpAction::Update,
+                value: value2.to_vec(),
+            });
+            assert_eq!(in_mem_db.touched.get(&key1).unwrap(), &Op{
+                action: OpAction::Read,
+                value: value1.to_vec(),
+            });
+            // end tx
+            assert_eq!(in_mem_db.get(&key2).unwrap(), Some(value2.to_vec()));
+            assert_eq!(in_mem_db.touched_tx.len(), 1);
+            assert_eq!(in_mem_db.touched.len(), 1);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            // commit tx
+            let _ = in_mem_db.commit_last_tx().unwrap();
+            assert_eq!(in_mem_db.touched_tx.len(), 0);
+            assert_eq!(in_mem_db.touched.len(), 2);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            // commit block
+            let _ = in_mem_db.commit().unwrap();
+            assert_eq!(in_mem_db.touched_tx.len(), 0);
+            assert_eq!(in_mem_db.touched.len(), 0);
+            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.unfinalized.len(), 2);
+        }
+        // implement finalize out of db trait.
+        assert_eq!(unfinalized.len(), 2);
+        assert_eq!(cache.len(), 0);
+        for (key, op) in unfinalized.iter() {
+            if op.action == OpAction::Delete {
+                db.lock().unwrap().delete(key).unwrap();
+            } else if op.action == OpAction::Update {
+                db.lock().unwrap().put(key, &op.value).unwrap();
+            } 
+        }
+        merge_maps(&mut cache, &unfinalized);
+        assert_eq!(cache.len(), 2);
+        unfinalized.clear();
+        assert_eq!(unfinalized.len(), 0);
+        // try fetching key2 from db. this should pass.
+        assert_eq!(db.lock().unwrap().get(&key2).unwrap(), Some(value2.to_vec()));
+        // try fetching key1 from db. this should pass.
+        assert_eq!(db.lock().unwrap().get(&key1).unwrap(), Some(value1.to_vec()));
+        // new block
+        {
+            let mut in_mem_db = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db.clone());
+            assert_eq!(db.lock().unwrap().get(&key1).unwrap(), Some(value1.to_vec()));
+            assert_eq!(in_mem_db.get(&key1).unwrap(), Some(value1.to_vec()));
+            assert_eq!(in_mem_db.get(&key2).unwrap(), Some(value2.to_vec()));
+            // delete key1
+            in_mem_db.delete(&key1).unwrap();
+            assert_eq!(in_mem_db.touched_tx.len(), 2);
+            assert_eq!(in_mem_db.touched.len(), 0);
+            assert_eq!(in_mem_db.cache.len(), 2);
+            assert_eq!(in_mem_db.unfinalized.len(), 0);
+            assert_eq!(in_mem_db.touched_tx.get(&key1).unwrap(), &Op{
+                action: OpAction::Delete,
+                value: vec![],
+            });
         }
     }
 }

@@ -830,7 +830,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                                     debug!(height, "received finalization");
                                     let _ = response.send(true);
 
-                                    // Persist the finalization
+                                    // Persist the finalization @todo
                                     finalized
                                         .put(height, finalization.block.digest(), finalization.proof.serialize().into())
                                         .await
