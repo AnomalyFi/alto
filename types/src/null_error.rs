@@ -1,4 +1,7 @@
-use std::{fmt::{Display, Formatter, Result}, error::Error};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter, Result},
+};
 
 #[derive(Debug)]
 pub struct NullError;

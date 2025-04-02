@@ -1,5 +1,5 @@
-use tracing_subscriber::{fmt, layer::SubscriberExt, registry::Registry};
 use tracing::dispatcher::with_default;
+use tracing_subscriber::{fmt, layer::SubscriberExt, registry::Registry};
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
@@ -27,7 +27,9 @@ where
     let buffer = Arc::new(Mutex::new(Vec::new()));
     let writer = {
         let buf = Arc::clone(&buffer);
-        move || SharedWriter { buffer: Arc::clone(&buf) }
+        move || SharedWriter {
+            buffer: Arc::clone(&buf),
+        }
     };
 
     let layer = fmt::layer()

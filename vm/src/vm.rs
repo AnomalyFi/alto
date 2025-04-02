@@ -9,9 +9,9 @@ use alto_storage::{
     database::Database,
     transactional_db::{InMemoryCachingTransactionalDb, Key, Op},
 };
+use alto_types::null_error::NullError;
 use alto_types::state_view::StateView;
 use alto_types::tx::{Tx, TxMethods, Unit, UnitContext};
-use alto_types::null_error::NullError;
 
 pub struct VM {
     pub block_number: u64,
@@ -55,7 +55,7 @@ impl VM {
             let result = self.apply_tx(tx.clone(), &mut state_view);
             match result {
                 Ok(output) => {
-                    // tx executed successfully. 
+                    // tx executed successfully.
                     // commit the state changes made by the tx.
                     let _ = in_mem_db.commit_last_tx();
                     // push the output of the tx to the outputs.
@@ -78,14 +78,18 @@ impl VM {
     }
 
     // applies a single tx on the given state.
-    fn apply_tx<T: StateView>(&mut self, tx: Tx, state_view: &mut T) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
+    fn apply_tx<T: StateView>(
+        &mut self,
+        tx: Tx,
+        state_view: &mut T,
+    ) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
         let tx_context = UnitContext {
             timestamp: self.timestamp,
             chain_id: self.chain_id,
             sender: tx.actor(),
         };
         let mut sv_boxed: Box<&mut dyn StateView> = Box::new(state_view);
-        let mut outputs:Vec<Vec<u8>> = Vec::new();
+        let mut outputs: Vec<Vec<u8>> = Vec::new();
         // apply units one by one.
         // stop and revert if any unit fails.
         for unit in tx.units {
@@ -94,7 +98,7 @@ impl VM {
                 Ok(output) => {
                     if let Some(output) = output {
                         outputs.push(output);
-                    }else{
+                    } else {
                         // if output is None, unit execution does not return anything.
                         // push empty vec.
                         outputs.push(vec![]);
@@ -115,29 +119,29 @@ mod tests {
     use alto_storage::database::Database;
     use alto_storage::hashmap_db::HashmapDatabase;
     use alto_storage::state_db::StateViewDb;
+    use alto_storage::transactional_db::{Key, Op};
     use alto_types::account::Account;
     use alto_types::address::Address;
     use alto_types::curr_timestamp;
+    use alto_types::tx::{Tx, TxMethods, Unit};
     use alto_types::units::msg::SequencerMsg;
     use alto_types::units::transfer::Transfer;
-    use std::sync::{Arc,Mutex};
+    use commonware_codec::{Codec, WriteBuffer};
     use std::collections::HashMap;
-    use alto_storage::transactional_db::{Key, Op};
-    use alto_types::tx::{Tx,TxMethods, Unit};
-    use commonware_codec::{WriteBuffer, Codec};
+    use std::sync::{Arc, Mutex};
 
     use super::VM;
 
     const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
     #[test]
-    fn test_single_tx(){
+    fn test_single_tx() {
         let state_db = Arc::new(Mutex::new(HashmapDatabase::new()));
         let cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
 
         let address = Address::create_random_address();
-        let account = Account{
+        let account = Account {
             address: address.clone(),
             balance: 1000,
         };
@@ -145,7 +149,11 @@ mod tests {
         let key = StateViewDb::key_accounts(&account.address);
         let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
         account.write(&mut write_buf);
-        state_db.lock().unwrap().put(&key, write_buf.as_ref()).unwrap();
+        state_db
+            .lock()
+            .unwrap()
+            .put(&key, write_buf.as_ref())
+            .unwrap();
 
         let block_number = 10;
         let timestamp = curr_timestamp();
@@ -158,14 +166,14 @@ mod tests {
             unfinalized,
             state_db,
         );
-        let tfer_unit = Transfer{
+        let tfer_unit = Transfer {
             to_address: Address::create_random_address(),
             value: 100,
             memo: vec![],
         };
-        let msg_unit = SequencerMsg{
+        let msg_unit = SequencerMsg {
             chain_id: 10,
-            data: vec![0,0,0,0],
+            data: vec![0, 0, 0, 0],
             from_address: Address::create_random_address(),
         };
         let units: Vec<Box<dyn Unit>> = vec![Box::new(tfer_unit), Box::new(msg_unit)];

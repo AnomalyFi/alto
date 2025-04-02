@@ -41,9 +41,12 @@ impl<'a> StateView for StateViewDb<'a> {
 
     fn get_balance(&mut self, address: &Address) -> Option<Balance> {
         match self.get_account(address) {
-            Ok(Some(acc)) => Some(acc.balance), // return balance if account exists
-            Ok(None) => Some(0),                // return 0 if no account
-            Err(_) => None,                     // return none if an err occurred
+            // return balance if account exists
+            Ok(Some(acc)) => Some(acc.balance),
+            // return 0 if no account
+            Ok(None) => Some(0),
+            // return none if an err occurred
+            Err(_) => None,
         }
     }
 
@@ -52,15 +55,15 @@ impl<'a> StateView for StateViewDb<'a> {
             Ok(Some(mut acc)) => {
                 acc.balance = amt;
                 self.set_account(&acc).is_ok()
-            },
+            }
             Err(e) => {
                 let acc = Account {
                     address: address.clone(),
                     balance: amt,
                 };
                 self.set_account(&acc).is_ok()
-            },
-            _ => false, 
+            }
+            _ => false,
         }
     }
 }
