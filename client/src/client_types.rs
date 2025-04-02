@@ -1,6 +1,7 @@
 use bytes::{BufMut, Bytes};
 use commonware_cryptography::sha256::Digest;
 use futures::channel::oneshot;
+use serde::{Deserialize, Serialize};
 use alto_types::Block;
 
 /// Messages sent from client
@@ -80,16 +81,34 @@ impl WebsocketClientMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Debug)]
 pub enum ClientRpcMessage {
     // for rpc
     SubmitTx {
         payload: Bytes,
     },
     GetBlockHeight {
-        response: oneshot::Sender<u64>
     },
     GetBlock {
         height: u64,
+    },
+}
+
+#[derive(Deserialize, Debug)]
+pub enum ClientRpcMessageResp {
+    // for rpc
+    SubmitTxResp {
+        ok: bool,
+        digest: Vec<u8>,
+        err: String,
+    },
+    GetBlockHeightResp {
+        chain_id: Vec<u8>,
+        height: u64,
+        err: String,
+    },
+    GetBlockResp {
+        height: u64,
+        err: String,
     },
 }

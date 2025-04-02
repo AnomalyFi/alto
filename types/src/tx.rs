@@ -211,7 +211,7 @@ impl TxMethods for Tx {
             let unit_bytes = unit.encode();
             // pack the unit type info.
             self.digest.extend((unit.unit_type() as u8).to_be_bytes());
-            // pack len of inidividual unit.
+            // pack len of individual unit.
             self.digest.extend((unit_bytes.len() as u64).to_be_bytes());
             // pack individual unit.
             self.digest.extend_from_slice(&unit_bytes);
