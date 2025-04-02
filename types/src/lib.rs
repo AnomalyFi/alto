@@ -11,11 +11,11 @@ pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullificatio
 pub mod account;
 pub mod address;
 pub mod signed_tx;
-pub mod state;
 pub mod tx;
 pub mod units;
 pub mod wallet;
 pub mod wasm;
+pub mod state_view;
 
 use rand::rngs::OsRng;
 

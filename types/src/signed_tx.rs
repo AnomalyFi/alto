@@ -143,6 +143,7 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
 
 #[cfg(test)]
 mod tests {
+    use std::default;
     use std::error::Error;
 
     use super::*;
@@ -173,6 +174,7 @@ mod tests {
             units: units.clone(),
             id,
             digest: digest.to_vec(),
+            actor: Address::empty(),
         };
         let mut origin_msg = SignedTx {
             tx,

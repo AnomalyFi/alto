@@ -4,7 +4,7 @@ use std::any::Any;
 
 use crate::address::Address;
 use crate::signed_tx::SignedTx;
-use crate::state::State;
+use crate::state_view::StateView;
 use crate::units;
 use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
@@ -59,7 +59,7 @@ pub trait Unit: UnitClone + Send + Sync + std::fmt::Debug {
     fn apply(
         &self,
         context: &UnitContext,
-        state: &mut Box<dyn State>,
+        state: &mut Box<&mut dyn StateView>,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>>;
 
     fn as_any(&self) -> &dyn Any;
@@ -73,33 +73,35 @@ impl Clone for Box<dyn Unit> {
 
 #[derive(Clone, Debug)]
 pub struct Tx {
-    // timestamp of the tx creation. set by the user.
-    // will be verified if the tx is in the valid window once received by validators.
-    // if the timestamp is not in the valid window, the tx will be rejected.
-    // if tx is in a valid window it is added to mempool.
-    // timestamp is used to prevent replay attacks. and counter infinite spam attacks as Tx does not have nonce.
+    /// timestamp of the tx creation. set by the user.
+    /// will be verified if the tx is in the valid window once received by validators.
+    /// if the timestamp is not in the valid window, the tx will be rejected.
+    /// if tx is in a valid window it is added to mempool.
+    /// timestamp is used to prevent replay attacks. and counter infinite spam attacks as Tx does not have nonce.
     pub timestamp: u64,
-    // max fee is the maximum fee the user is willing to pay for the tx.
+    /// max fee is the maximum fee the user is willing to pay for the tx.
     pub max_fee: u64,
-    // priority fee is the fee the user is willing to pay for the tx to be included in the next block.
+    /// priority fee is the fee the user is willing to pay for the tx to be included in the next block.
     pub priority_fee: u64,
-    // chain id is the id of the chain the tx is intended for.
+    /// chain id is the id of the chain the tx is intended for.
     pub chain_id: u64,
-    // units are fundamental unit of a tx. similar to actions.
+    /// units are fundamental unit of a tx. similar to actions.
     pub units: Vec<Box<dyn Unit>>,
 
-    // id is the transaction id. It is the hash of digest.
+    /// id is the transaction id. It is the hash of digest.
     pub id: Digest,
-    // digest is encoded tx.
+    /// digest is encoded tx.
     pub digest: Vec<u8>,
+    /// address of the tx sender. wrap this in a better way.
+    pub actor: Address,
 }
 
 pub trait TxMethods: Sized {
-    // new is used to create a new instance of Tx with given units and chain id.
+    /// new is used to create a new instance of Tx with given units and chain id.
     fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self;
-    // set_fee is used to set the max fee and priority fee of the tx.
+    /// set_fee is used to set the max fee and priority fee of the tx.
     fn set_fee(&mut self, max_fee: u64, priority_fee: u64);
-    // sign is used to sign the tx with the given wallet.
+    /// sign is used to sign the tx with the given wallet.
     fn sign(&mut self, wallet: Wallet) -> SignedTx;
     fn from(
         timestamp: u64,
@@ -107,17 +109,22 @@ pub trait TxMethods: Sized {
         priority_fee: u64,
         max_fee: u64,
         chain_id: u64,
+        actor: Address,
     ) -> Self;
 
-    // returns tx id.
+    /// returns tx id.
     fn id(&mut self) -> Digest;
-    // returns digest of the tx.
+    /// returns digest of the tx.
     fn digest(&self) -> Vec<u8>;
-    // encodes the tx, writes to digest and returns the digest.
-    // ensure all fields are properly set before calling this function.
+    /// encodes the tx, writes to digest and returns the digest.
+    /// ensure all fields are properly set before calling this function.
     fn encode(&mut self) -> Vec<u8>;
 
     fn decode(bytes: &[u8]) -> Result<Self, String>;
+
+    fn set_actor(&mut self, actor: Address);
+
+    fn actor(&self) -> Address; 
 }
 
 impl Default for Tx {
@@ -130,6 +137,7 @@ impl Default for Tx {
             chain_id: 19517,
             id: [0; 32].into(),
             digest: vec![],
+            actor: Address::empty(),
         }
     }
 }
@@ -160,6 +168,7 @@ impl TxMethods for Tx {
         priority_fee: u64,
         max_fee: u64,
         chain_id: u64,
+        actor: Address,
     ) -> Self {
         let mut tx = Self::default();
         tx.timestamp = timestamp;
@@ -167,6 +176,7 @@ impl TxMethods for Tx {
         tx.max_fee = max_fee;
         tx.priority_fee = priority_fee;
         tx.chain_id = chain_id;
+        tx.actor = actor;
         tx.encode();
         tx
     }
@@ -233,6 +243,14 @@ impl TxMethods for Tx {
         tx.id = sha256::hash(&tx.digest);
         // return transaction.
         Ok(tx)
+    }
+
+    fn set_actor(&mut self, actor: Address) {
+        self.actor = actor;
+    }
+
+    fn actor(&self) -> Address {
+        self.actor.clone()
     }
 }
 
@@ -329,6 +347,7 @@ mod tests {
             chain_id,
             units: units.clone(),
             id,
+            actor: Address::empty(),
             digest: digest.to_vec(),
         };
         let encoded_bytes = origin_msg.encode();
@@ -355,7 +374,6 @@ mod tests {
 
         // units
         assert_eq!(origin_transfer.to_address, decode_transfer.to_address);
-        assert_eq!(origin_transfer.from_address, decode_transfer.from_address);
         assert_eq!(origin_transfer.value, decode_transfer.value);
         assert_eq!(origin_transfer.memo, decode_transfer.memo);
         Ok(())

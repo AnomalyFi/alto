@@ -1,10 +1,10 @@
 use crate::{
-    address::Address,
-    state::State,
-    tx::{Unit, UnitContext, UnitType},
+    address::Address, state_view::StateView, tx::{Unit, UnitContext, UnitType}
 };
 use std::any::Any;
 
+// @todo couple SequencerMsg with DA. 
+// and skip execution no-op.
 #[derive(Clone, Debug)]
 pub struct SequencerMsg {
     pub chain_id: u64,
@@ -53,10 +53,10 @@ impl Unit for SequencerMsg {
 
     fn apply(
         &self,
-        context: &UnitContext,
-        state: &mut Box<dyn State>,
+        _: &UnitContext,
+        _: &mut Box<&mut dyn StateView>,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-        todo!()
+        Ok(None)
     }
 
     fn as_any(&self) -> &dyn Any {

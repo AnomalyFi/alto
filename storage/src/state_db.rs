@@ -4,23 +4,20 @@ use alto_types::address::Address;
 use bytes::Bytes;
 use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
-
+use alto_types::state_view::StateView;
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
-// StateDb is a wrapper around TransactionalDb that provides StateViews for block execution.
-// StateDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
-// It allows for easy retrieval and modification of account states, such as balances.
+// @todo rename StateDb to StateView.
+/// StateDb is a wrapper around TransactionalDb that provides StateViews for block execution.
+/// StateDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
+/// It allows for easy retrieval and modification of account states, such as balances.
 pub struct StateDb<'a> {
     db: &'a mut dyn TransactionalDb,
 }
 
-impl<'a> StateDb<'a> {
-    pub fn new(db: &'a mut dyn TransactionalDb) -> Self {
-        StateDb { db }
-    }
-
-    pub fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
+impl<'a> StateView for StateDb<'a> {
+    fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
         self.db.get(&key).and_then(|v| {
             if let Some(value) = v {
@@ -35,14 +32,14 @@ impl<'a> StateDb<'a> {
         })
     }
 
-    pub fn set_account(&mut self, acc: &Account) -> Result<(), Box<dyn Error>> {
+    fn set_account(&mut self, acc: &Account) -> Result<(), Box<dyn Error>> {
         let key = Self::key_accounts(&acc.address);
         let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
         acc.write(&mut write_buf);
         self.db.insert(&key, write_buf.as_ref().to_vec())
     }
 
-    pub fn get_balance(&mut self, address: &Address) -> Option<Balance> {
+    fn get_balance(&mut self, address: &Address) -> Option<Balance> {
         match self.get_account(address) {
             Ok(Some(acc)) => Some(acc.balance), // return balance if account exists
             Ok(None) => Some(0),                // return 0 if no account
@@ -50,7 +47,7 @@ impl<'a> StateDb<'a> {
         }
     }
 
-    pub fn set_balance(&mut self, address: &Address, amt: Balance) -> bool {
+    fn set_balance(&mut self, address: &Address, amt: Balance) -> bool {
         match self.get_account(address) {
             Ok(Some(mut acc)) => {
                 acc.balance = amt;
@@ -59,10 +56,17 @@ impl<'a> StateDb<'a> {
             _ => false,
         }
     }
+}
+
+impl<'a>  StateDb <'a> {
+    pub fn new(db: &'a mut dyn TransactionalDb) -> Self {
+        StateDb { db }
+    }
 
     fn key_accounts(addr: &Address) -> [u8; 33] {
         Self::make_multi_key(ACCOUNTS_PREFIX, addr.as_slice())
     }
+
     fn make_multi_key(prefix: u8, sub_id: &[u8]) -> [u8; 33] {
         assert_eq!(sub_id.len(), 32, "Sub_id must be exactly 32 bytes");
 
