@@ -10,7 +10,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode}
     };
-    use commonware_cryptography::sha256;
+    use commonware_cryptography::{sha256, Sha256};
     use commonware_macros::{test_async, test_traced};
     use commonware_runtime::{tokio::{self, Context, Executor}, Clock, Metrics, Runner, Spawner};
     use futures::{channel::mpsc, future::join_all, SinkExt, StreamExt};
@@ -18,7 +18,7 @@ mod tests {
     use tower::ServiceExt;
     use tracing_subscriber::field::debug;
 
-    use crate::actors::net::ingress::WebsocketClientMessage;
+    use crate::actors::{mempool::mempool, net::ingress::WebsocketClientMessage};
 
     use super::{actor::Actor, ingress::Message, actor::{self}};
     use tracing::debug;
@@ -27,8 +27,11 @@ mod tests {
     fn test_msg() {
         let (runner, mut context) = Executor::init(tokio::Config::default());
         runner.start(async move {
+            let (mempool_sender, mempool_receiver) = mpsc::channel(1024);
+            let mempool_mailbox: mempool::Mailbox<Sha256> = mempool::Mailbox::new(mempool_sender);
             let (actor, mailbox) = Actor::new(context, actor::Config {
-                port: 7890
+                port: 7890,
+                mempool: mempool_mailbox
             });
 
             let Some(router) = actor.router else {
@@ -58,8 +61,11 @@ mod tests {
     fn test_ws() {
         let (runner, mut context) = Executor::default();
         runner.start(async move {
+            let (mempool_sender, mempool_receiver) = mpsc::channel(1024);
+            let mempool_mailbox: mempool::Mailbox<Sha256> = mempool::Mailbox::new(mempool_sender);
             let (actor, mut mailbox) = Actor::new(context.with_label("router"), actor::Config {
-                port: 7890
+                port: 7890,
+                mempool: mempool_mailbox
             });
 
             debug!("starting router");

@@ -1,4 +1,4 @@
-use std::{collections::{HashMap}, time::{Duration, SystemTime}};
+use std::{collections::HashMap, hash::Hash, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
 use commonware_cryptography::{ed25519::PublicKey, sha256, Digest, Hasher, Sha256};
@@ -20,26 +20,25 @@ use super::{handler::{Handler, self}, key::{self, MultiIndex, Value}, ingress, c
 use crate::{actors::net, maybe_delay_between};
 
 #[derive(Clone, Debug)]
-pub struct Batch<D: Digest>  {
+pub struct Batch<H: Hasher>  {
     pub timestamp: SystemTime,
-    pub txs: Vec<RawTransaction<D>>,
-    pub digest: D,
+    // TODO: store real transactions not just raws
+    pub txs: Vec<RawTransaction<H>>,
+    pub digest: H::Digest,
 }
 
-impl<D: Digest> Batch<D> 
-    where Sha256: Hasher<Digest = D>
-{
-    fn compute_digest(txs: &Vec<RawTransaction<D>>) -> D {
-        let mut hasher = Sha256::new();
+impl<H: Hasher> Batch<H> {
+    fn compute_digest(txs: &Vec<RawTransaction<H>>) -> H::Digest {
+        let mut hasher = H::new();
 
-        for tx in txs.into_iter() {
-            hasher.update(tx.raw.as_ref());
+        for tx in txs.iter() {
+            hasher.update(&tx.raw);
         }
 
         hasher.finalize()
     }
 
-    pub fn new(txs: Vec<RawTransaction<D>>, timestamp: SystemTime) -> Self {
+    pub fn new(txs: Vec<RawTransaction<H>>, timestamp: SystemTime) -> Self {
         let digest = Self::compute_digest(&txs);
 
         Self {
@@ -96,27 +95,25 @@ impl<D: Digest> Batch<D>
         })
     }
 
-    pub fn contain_tx(&self, digest: &D) -> bool {
+    pub fn contain_tx(&self, digest: &H::Digest) -> bool {
         self.txs.iter().any(|tx| &tx.digest == digest) 
     }
 
-    pub fn tx(&self, digest: &D) -> Option<RawTransaction<D>> {
+    pub fn tx(&self, digest: &H::Digest) -> Option<RawTransaction<H>> {
         self.txs.iter().find(|tx| &tx.digest == digest).cloned()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct RawTransaction<D: Digest> {
+pub struct RawTransaction<H: Hasher> {
     pub raw: Bytes,
 
-    pub digest: D
+    pub digest: H::Digest 
 }
 
-impl<D: Digest> RawTransaction<D> 
-    where Sha256: Hasher<Digest = D>
-{
-    fn compute_digest(raw: &Bytes) -> D {
-        let mut hasher = Sha256::new();
+impl<H: Hasher> RawTransaction<H> {
+    fn compute_digest(raw: &Bytes) -> H::Digest {
+        let mut hasher = H::new();
         hasher.update(&raw);
         hasher.finalize()
     }
@@ -139,62 +136,60 @@ impl<D: Digest> RawTransaction<D>
     }
 }
 
-impl<D: Digest> From<net::actor::DummyTransaction> for RawTransaction<D> 
-    where Sha256: Hasher<Digest = D>
-{
+impl<H: Hasher> From<net::actor::DummyTransaction> for RawTransaction<H> {
     fn from(value: net::actor::DummyTransaction) -> Self {
         let raw = Bytes::from(value.payload);
         RawTransaction::new(raw)
     }
 }
 
-pub enum Message<D: Digest> {
+pub enum Message<H: Hasher> {
     // mark batch as accepted by the netowrk through the broadcast protocol
     BatchAcknowledged {
-        digest: D,
+        digest: H::Digest,
         response: oneshot::Sender<bool>
     },
     // from rpc or websocket
-    SubmitTx {
-        payload: RawTransaction<D>,
-        response: oneshot::Sender<bool>
+    SubmitTxs {
+        payload: Vec<RawTransaction<H>>,
+        response: oneshot::Sender<Vec<bool>>
     },
     BatchConsumed {
-        digests: Vec<D>,
+        digests: Vec<H::Digest>,
         block_number: u64,
         response: oneshot::Sender<bool>,
     },
     // proposer consume batches to produce a block
     ConsumeBatches {
-        response: oneshot::Sender<Vec<Batch<D>>>
+        response: oneshot::Sender<Vec<Batch<H>>>
     },
     GetTx {
-        digest: D,
-        response: oneshot::Sender<Option<RawTransaction<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<RawTransaction<H>>>
     },
     GetBatch {
-        digest: D,
-        response: oneshot::Sender<Option<Batch<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<Batch<H>>>
     },
     GetBatchContainTx {
-        digest: D,
-        response: oneshot::Sender<Option<Batch<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<Batch<H>>>
     }
 }
 
 #[derive(Clone)]
-pub struct Mailbox<D: Digest> {
-    sender: mpsc::Sender<Message<D>>
+pub struct Mailbox<H: Hasher> {
+    sender: mpsc::Sender<Message<H>>
 }
 
-impl<D: Digest> Mailbox<D> {
-    pub fn new(sender: mpsc::Sender<Message<D>>) -> Self {
+impl<H: Hasher> Mailbox<H> {
+    pub fn new(sender: mpsc::Sender<Message<H>>) -> Self {
         Self {
             sender
         }
     }
 
-    pub async fn acknowledge_batch(&mut self, digest: D) -> bool {
+    pub async fn acknowledge_batch(&mut self, digest: H::Digest) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::BatchAcknowledged { digest, response})
@@ -204,17 +199,17 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batch acknowledge")
     }
 
-    pub async fn issue_tx(&mut self, tx: RawTransaction<D>) -> bool {
+    pub async fn submit_txs(&mut self, payload: Vec<RawTransaction<H>>) -> Vec<bool> {
         let (response, receiver) = oneshot::channel();
         self.sender
-            .send(Message::SubmitTx { payload: tx, response })
+            .send(Message::SubmitTxs { payload, response })
             .await
             .expect("failed to issue tx");
 
         receiver.await.expect("failed to receive tx issue status")
     }
 
-    pub async fn consume_batches(&mut self) -> Vec<Batch<D>> {
+    pub async fn consume_batches(&mut self) -> Vec<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::ConsumeBatches { response })
@@ -224,7 +219,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batches")
     }
 
-    pub async fn consumed_batches(&mut self, digests: Vec<D>, block_number: u64) -> bool {
+    pub async fn consumed_batches(&mut self, digests: Vec<H::Digest>, block_number: u64) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::BatchConsumed { digests, block_number, response })
@@ -234,7 +229,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to mark batches as consumed")
     }
 
-    pub async fn get_tx(&mut self, digest: D) -> Option<RawTransaction<D>> {
+    pub async fn get_tx(&mut self, digest: H::Digest) -> Option<RawTransaction<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetTx { digest, response })
@@ -244,7 +239,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive tx")
     }
 
-    pub async fn get_batch(&mut self, digest: D) -> Option<Batch<D>> {
+    pub async fn get_batch(&mut self, digest: H::Digest) -> Option<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatch { digest, response })
@@ -254,7 +249,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batch")
     }
 
-    pub async fn get_batch_contain_tx(&mut self, digest: D) -> Option<Batch<D>> {
+    pub async fn get_batch_contain_tx(&mut self, digest: H::Digest) -> Option<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatchContainTx { digest, response })
@@ -278,24 +273,24 @@ pub struct Config {
 pub struct Mempool<
     B: Blob,
     R: Rng + Clock + GClock + Spawner + Metrics + Storage<B>, 
-    D: Digest + Into<sha256::Digest> + From<sha256::Digest>
+    H: Hasher
 > {
     context: R,
 
     public_key: PublicKey,
 
 
-    batches: HashMap<D, Batch<D>>,
+    batches: HashMap<H::Digest, Batch<H>>,
     
-    acknowledged: Vec<D>,
+    acknowledged: Vec<H::Digest>,
 
     //TODO: replace the following two
-    accepted: Archive<TwoCap, D, B, R>,
-    consumed: Archive<TwoCap, D, B, R>,
+    accepted: Archive<TwoCap, H::Digest, B, R>,
+    consumed: Archive<TwoCap, H::Digest, B, R>,
 
-    txs: Vec<RawTransaction<D>>,
+    txs: Vec<RawTransaction<H>>,
 
-    mailbox: mpsc::Receiver<Message<D>>,
+    mailbox: mpsc::Receiver<Message<H>>,
     mailbox_size: usize,
 
     block_height_seen: u64,
@@ -308,12 +303,9 @@ pub struct Mempool<
 impl<
     B: Blob,
     R: Rng + Clock + GClock + Spawner + Metrics + Storage<B>, 
-    D: Digest + Into<sha256::Digest> + From<sha256::Digest>
-> Mempool<B, R, D> 
-    where 
-        Sha256: Hasher<Digest = D>,
-{
-    pub async fn init(context: R, cfg: Config) -> (Self, Mailbox<D>) {
+    H: Hasher,
+> Mempool<B, R, H> {
+    pub async fn init(context: R, cfg: Config) -> (Self, Mailbox<H>) {
         let accepted_journal = Journal::init(
             context.with_label("accepted_journal"), 
             journal::variable::Config {
@@ -387,7 +379,7 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ), 
         coordinator: Coordinator<PublicKey>,
-        app_mailbox: ingress::Mailbox<D, PublicKey>
+        app_mailbox: ingress::Mailbox<H, PublicKey>
     ) -> Handle<()> {
         self.context.spawn_ref()(self.run(batch_network, backfill_network, coordinator, app_mailbox))
     }
@@ -403,10 +395,10 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ), 
         coordinator: Coordinator<PublicKey>,
-        mut app_mailbox: ingress::Mailbox<D, PublicKey>
+        mut app_mailbox: ingress::Mailbox<H, PublicKey>
     ) {
         let (handler_sender, mut handler_receiver) = mpsc::channel(self.mailbox_size);
-        let handler = Handler::new(handler_sender);
+        let handler = Handler::<H>::new(handler_sender);
         let (resolver_engine, mut resolver) = p2p::Engine::new(
             self.context.with_label("resolver"),
             p2p::Config {
@@ -427,7 +419,7 @@ impl<
         );
         resolver_engine.start(backfill_network);
 
-        let mut waiters: HashMap<D, Vec<oneshot::Sender<Option<Batch<D>>>>> = HashMap::new();
+        let mut waiters: HashMap<H::Digest, Vec<oneshot::Sender<Option<Batch<H>>>>> = HashMap::new();
         let mut propose_timeout = self.context.current() + self.batch_propose_interval;
         let accepted = Wrapped::new(self.accepted);
         let consumed = Wrapped::new(self.consumed);
@@ -445,14 +437,17 @@ impl<
                         return;
                     };
                     match message {
-                        Message::SubmitTx { payload, response } => {
-                            if !payload.validate() {
-                                let _ = response.send(false);
-                                return;    
+                        Message::SubmitTxs { payload, response } => {
+                            let mut result = Vec::with_capacity(payload.len());
+                            for tx in payload.into_iter() {
+                                if !tx.validate() {
+                                    result.push(false);
+                                    continue
+                                }
+                                self.txs.push(tx);
+                                result.push(true);
                             }
-
-                            self.txs.push(payload);
-                            let _ = response.send(true);
+                            let _ = response.send(result);
                         },
                         // batch ackowledged by the network 
                         Message::BatchAcknowledged { digest, response } => {
@@ -483,7 +478,7 @@ impl<
                             // update the seen height
                             self.block_height_seen = block_number;
 
-                            let consumed_keys: Vec<D> = self.batches.iter()
+                            let consumed_keys: Vec<H::Digest> = self.batches.iter()
                                 .filter_map(|(digest, batch)| {
                                     if digests.contains(&batch.digest) {
                                         Some(digest.clone())
@@ -500,7 +495,7 @@ impl<
                             }
 
                             // remove digests and batches
-                            let consumed_batches: Vec<Batch<D>> = consumed_keys.into_iter()
+                            let consumed_batches: Vec<Batch<H>> = consumed_keys.into_iter()
                                 .filter_map(|key| self.batches.remove(&key))
                                 .collect();
 
@@ -606,18 +601,19 @@ impl<
                         handler::Message::Produce { key, response } => {
                             match key.to_value() {
                                 key::Value::Digest(digest) => {
-                                    if let Some(batch) = self.batches.get(&D::from(digest)).cloned() {
+                                    if let Some(batch) = self.batches.get(&digest).cloned() {
                                         let _ = response.send(batch.serialize().into());
                                         continue;
                                     };
 
-                                    let consumed = consumed.get(Identifier::Key(&D::from(digest)))
-                                        .await 
-                                        .expect("Failed to get accepted batch");
-                                    if let Some(consumed) = consumed {
-                                        let _ = response.send(consumed);
-                                        continue;
-                                    }
+                                    // TODO: replace with new key-value db
+                                    // let consumed = consumed.get(Identifier::Key(&H::Digest::from(digest)))
+                                    //     .await 
+                                    //     .expect("Failed to get accepted batch");
+                                    // if let Some(consumed) = consumed {
+                                    //     let _ = response.send(consumed);
+                                    //     continue;
+                                    // }
                                     debug!(?digest, "missing batch");
                                 }
                             }         
@@ -626,7 +622,7 @@ impl<
                             match key.to_value() {
                                 key::Value::Digest(digest) => {
                                     let batch = Batch::deserialize(&value).expect("Failed to deserialize batch");
-                                    if batch.digest.into() != digest {
+                                    if batch.digest != digest {
                                         let _ = response.send(false);
                                         continue;
                                     }

@@ -1,6 +1,6 @@
 use super::{ ingress::{Mailbox, Message}, mempool};
 use commonware_broadcast::Broadcaster;
-use commonware_cryptography::Digest;
+use commonware_cryptography::{Digest, Hasher};
 use commonware_utils::Array;
 use futures::{
     channel::mpsc,
@@ -9,19 +9,19 @@ use futures::{
 use tracing::{error, warn, debug};
 
 
-pub struct Actor<D: Digest, P: Array> {
-    mailbox: mpsc::Receiver<Message<D, P>>,
+pub struct Actor<H: Hasher, P: Array> {
+    mailbox: mpsc::Receiver<Message<H, P>>,
 }
 
-impl<D: Digest, P: Array> Actor<D, P> {
-    pub fn new() -> (Self, Mailbox<D, P>) {
+impl<H: Hasher, P: Array> Actor<H, P> {
+    pub fn new() -> (Self, Mailbox<H, P>) {
         let (sender, receiver) = mpsc::channel(1024);
         (Actor { mailbox: receiver }, Mailbox::new(sender))
     }
 
     pub async fn run(mut self, 
-        mut engine: impl Broadcaster<Digest = D>,
-        mut mempool: mempool::Mailbox<D>
+        mut engine: impl Broadcaster<Digest = H::Digest>,
+        mut mempool: mempool::Mailbox<H>
     ) {
         // it passes msgs in the mailbox of the actor to the engine mailbox
         while let Some(msg) = self.mailbox.next().await {

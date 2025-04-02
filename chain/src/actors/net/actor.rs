@@ -1,5 +1,5 @@
 use std::{
-   collections::{HashMap, HashSet}, io, ops::Deref, sync::{Arc, RwLock}
+   collections::{HashMap, HashSet}, hash::Hash, io, ops::Deref, sync::{Arc, RwLock}
 };
 use alto_client::Client;
 use alto_types::Block;
@@ -12,7 +12,7 @@ use axum::{
 };
 
 use bytes::Bytes;
-use commonware_cryptography::{sha256, Digest};
+use commonware_cryptography::{sha256, Digest, Hasher};
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use futures::{channel::{mpsc, oneshot}, lock::Mutex, SinkExt, StreamExt};
 use rand::Rng;
@@ -20,6 +20,8 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{debug, event, Level, error};
 use tracing_subscriber::fmt::format;
+
+use crate::actors::mempool::mempool;
 
 use super::ingress::{Mailbox, Message, WebsocketClientMessage};
 
@@ -33,36 +35,39 @@ type ClientSender = mpsc::Sender<Arc<Message>>;
 type ClientID = String;
 type Clients = Arc<RwLock<HashMap<ClientID, ClientSender>>>;
 
-type SharedState<R: Rng + Spawner + Metrics + Clock> = Arc<RwLock<AppState<R>>>;
+type SharedState<R: Rng + Spawner + Metrics + Clock, H: Hasher> = Arc<RwLock<AppState<R, H>>>;
 
 #[derive(Clone)]
-struct AppState<R: Rng + Spawner + Metrics + Clock>   {
+struct AppState<R: Rng + Spawner + Metrics + Clock, H: Hasher>   {
     context: R,
     clients: Clients,
+    mempool: mempool::Mailbox<H>,
     block_listeners: Arc<RwLock<HashSet<ClientID>>>,
     tx_listeners: Arc<RwLock<HashSet<ClientID>>>
 }
 
-pub struct Config {
+pub struct Config<H: Hasher> {
     pub port: i32,
+
+    pub mempool: mempool::Mailbox<H>
 }
 
-pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
+pub struct Actor<R: Rng + Spawner + Metrics + Clock, H: Hasher> {
     context: R,
     port: i32,
     listener: Option<TcpListener>,
     pub router: Option<axum::Router>,
     is_active: bool,
 
-    state: SharedState<R>
+    state: SharedState<R, H>
 }
 
-impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
+impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
     pub const WEBSOCKET_PREFIX:  &'static str = "/ws";
     pub const RPC_PREFIX: &'static str = "/api";
     pub const PATH_SUBMIT_TX: &'static str = "/mempool/submit";
 
-    pub fn new(context: R, cfg: Config) -> (Self, Mailbox) {
+    pub fn new(context: R, cfg: Config<H>) -> (Self, Mailbox) {
         if cfg.port == 0 {
             panic!("Invalid port number");
         }
@@ -70,8 +75,9 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         let (sender, mut receiver) = mpsc::channel(1024);
         let mailbox = Mailbox::new(sender);
 
-        let state = AppState::<R> {
+        let state = AppState::<R, H> {
             context: context.with_label("app_state"),
+            mempool: cfg.mempool,
             clients: Arc::new(RwLock::new(HashMap::new())),
             block_listeners: Arc::new(RwLock::new(HashSet::new())),
             tx_listeners: Arc::new(RwLock::new(HashSet::new())),
@@ -121,7 +127,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
     }
 
     /// handles messages from other services within a node such as block messages 
-    async fn handle_message(state: SharedState<R>, msg: Message) {
+    async fn handle_message(state: SharedState<R, H>, msg: Message) {
         println!("handling msg {:?}", msg);
         let block_listeners = state.read().unwrap().block_listeners.clone();
         let clients = state.read().unwrap().clients.clone();
@@ -147,13 +153,13 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
 
     async fn ws_handler(
         ws: WebSocketUpgrade,
-        State(state): State<SharedState<R>>,
+        State(state): State<SharedState<R, H>>,
     ) -> impl IntoResponse {
         let client_id = uuid::Uuid::new_v4().to_string();
         ws.on_upgrade(move |socket| Self::handle_socket(socket, client_id, state))
     }
 
-    async fn handle_socket(mut socket: WebSocket, client_id: ClientID, state: SharedState<R>) {
+    async fn handle_socket(mut socket: WebSocket, client_id: ClientID, state: SharedState<R, H>) {
         let (mut socket_sender, mut socket_receiver) = socket.split();
 
         let (tx, mut rx) = mpsc::channel::<Arc<Message>>(1024);
@@ -194,7 +200,10 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     state.tx_listeners.write().unwrap().insert(client_id.clone());
                                 }, 
                                 WebsocketClientMessage::SubmitTxs(txs) => {
-                                    unimplemented!()
+                                    let mut mempool = state.mempool.clone();
+                                    let txs: Vec<_> = txs.into_iter().map(|tx| mempool::RawTransaction::<H>::new(tx)).collect();
+                                    // let submission_res = mempool.submit_txs(txs).await;
+                                    // debug!(?submission_res, "txs submission result")
                                 }
                             }
                         },
@@ -223,7 +232,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
     }
 
     async fn handle_submit_tx(
-        State(state): State<SharedState<R>>,
+        State(state): State<SharedState<R, H>>,
         payload: Bytes,
     ) -> impl IntoResponse {
         // TODO: send to mempool mailbox
