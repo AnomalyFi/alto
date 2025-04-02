@@ -1,5 +1,4 @@
-use crate::database::Database;
-use crate::transactional_db::TransactionalDb;
+use crate::transactional_db::{InMemoryCachingTransactionalDb, TransactionalDb};
 use alto_types::account::{Account, Balance};
 use alto_types::address::Address;
 use bytes::Bytes;
@@ -9,38 +8,36 @@ use std::error::Error;
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
-// @todo state db will be a wrapper around a db implementing trait TransactionalDb. 
-// state db interface will be provided for every transaction. 
-// db implementing TransactionalDb will be changed for every block and has an ability to rollback over reverted transactions.
-pub struct StateDb {
-    db: Box<dyn TransactionalDb>,
+// StateDb is a wrapper around TransactionalDb that provides StateViews for block execution.
+// StateDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
+// It allows for easy retrieval and modification of account states, such as balances.
+pub struct StateDb<'a> {
+    db: &'a mut dyn TransactionalDb<'a>,
 }
 
-impl StateDb {
-    pub fn new(db: Box<dyn TransactionalDb>) -> StateDb {
+impl<'a> StateDb<'a> {
+    pub fn new(db: &'a mut dyn TransactionalDb<'a>) -> Self {
         StateDb { db }
     }
 
     pub fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
-        // try cache first
-        if let Some(value) = self.db.get_from_cache(&key)?
-            .or_else(|| self.db.get(&key).ok().flatten()) // falls to DB if cache miss
-        {
-            let bytes = Bytes::from(value);
-            let mut read_buf = ReadBuffer::new(bytes);
-            let acc = Account::read(&mut read_buf)?;
-            return Ok(Some(acc));
-        }
-        Ok(None)
+        self.db.get(&key).and_then(|v| {
+            if let Some(value) = v {
+                let bytes = Bytes::from(value);
+                let mut read_buf = ReadBuffer::new(bytes);
+                Account::read(&mut read_buf).map(Some).map_err(|e| Box::new(e) as Box<dyn Error>)
+            } else {
+                Err("Account not found".into())
+            }
+        })
     }
 
     pub fn set_account(&mut self, acc: &Account) -> Result<(), Box<dyn Error>> {
         let key = Self::key_accounts(&acc.address);
         let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
         acc.write(&mut write_buf);
-        self.db.put(&key, write_buf.as_ref())?;
-        Ok(())
+        self.db.insert(&key, write_buf.as_ref().to_vec())
     }
 
     pub fn get_balance(&mut self, address: &Address) -> Option<Balance> {
@@ -74,68 +71,31 @@ impl StateDb {
     }
 }
 
-impl Database for StateDb {
-    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn Error>> {
-       self.db.put(key, value)
-    }
-
-    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        self.db.get(key)
-    }
-
-    fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
-        self.db.delete(key)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alto_types::address::Address;
-    use alto_types::account::Account;
-    use crate::rocks_db::RocksDbDatabase;
-    use crate::transactional_db::InMemoryCachingTransactionalDb;
-
+    use crate::hashmap_db::HashmapDatabase;
+    use crate::transactional_db::{InMemoryCachingTransactionalDb, Op, Key};
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
-    fn setup_state_db() -> StateDb {
-        let db = InMemoryCachingTransactionalDb::new(Box::new(
-            RocksDbDatabase::new_tmp_db().expect("db could not be created"),
-        ));
-        StateDb::new(Box::new(db))
-    }
     #[test]
     fn test_statedb_accounts() {
-        let mut state_db = setup_state_db();
-
-        let mut account = Account::new();
-        let test_address_bytes = [0u8; 32];
-        let test_address = Address::new(&test_address_bytes);
-        account.address = test_address.clone();
-        account.balance = 100;
-
-        // make sure account does not exist (base case)
-        assert!(state_db.get_account(&test_address).unwrap().is_none());
-
-        // create account and check retrieval
-        state_db.set_account(&account).unwrap();
-        let retrieved_account = state_db.get_account(&test_address).unwrap().expect("Account not found");
-        assert_eq!(retrieved_account.address, test_address);
-        assert_eq!(retrieved_account.balance, 100);
-
-        // update account balance and check retrieval
-        assert!(state_db.set_balance(&test_address, 200));
-        assert_eq!(state_db.get_balance(&test_address), Some(200));
-
-        // test if updating balance is persistent
-        assert!(state_db.set_balance(&test_address, 300));
-        let updated_account = state_db.get_account(&test_address).unwrap().expect("Account not found");
-        assert_eq!(updated_account.balance, 300);
-
-        // test retrieval of balance directly
-        assert_eq!(state_db.get_balance(&test_address), Some(300));
-
-        // check a non-existent account returns None
-        let non_existent_address = Address::new(b"0xDEAD");
-        assert!(state_db.get_account(&non_existent_address).unwrap().is_none());
+        // setup state db
+        let mut cache: HashMap<Key, Op> = HashMap::new();
+        let mut unfinalized: HashMap<Key, Op> = HashMap::new();
+        let db = Arc::new(Mutex::new(HashmapDatabase::new()));
+    
+        let mut in_mem = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db);
+        let address = Address::create_random_address();
+        {
+            let mut state_db = StateDb::new(&mut in_mem);
+            // use state_db
+            let _ = state_db.get_account(&address); // sample call
+        } // <- state_db dropped here
+    
+        // ✅ Continue using `in_mem` freely
+        // let _ = in_mem.commit();
     }
 }

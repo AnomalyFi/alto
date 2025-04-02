@@ -4,9 +4,7 @@ use std::error::Error;
 use crate::database::Database;
 use std::sync::Arc;
 
-type Key = [u8; 33];
-// @todo rewrite InMemoryCachingTransactionalDb, to implement rollback and tracking state changes properly. 
-// carrying forward the cached transactions among others.
+pub type Key = [u8; 33];
 
 // i. should track every operation, that a tx does.
 // ii. should be able to rollback if a tx reverts.
@@ -25,57 +23,56 @@ pub enum OpAction {
     Delete, 
 }
 
+/// Op contains action performed and value stored over a key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Op{
+    // Action performed
     pub action: OpAction,
+    // Resulting value after perfromed action.
     pub value: Vec<u8>,
 }
 
 /// Implements finalization to database out of TransactionalDb trait.
 pub trait TransactionalDb<'a> {
-    // initialize the cache with an already available hashmap of key-value pairs.
+    /// initialize the cache with an already available hashmap of key-value pairs.
     fn init_cache(&mut self, cache: & 'a mut HashMap<Key, Op>);
-    // create a next instance.
-    // this is called only after calling commit_last_tx. 
-    // else, some of the key value pair changes get lost.
-    // fn next_instance(&mut self) -> Self;
     /// get the value corresponding to the key. 
     /// use this method for querying state.
     fn get(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
-    // insert a key-pair. could be a create or delete action. 
-    // underlying struct should handle the OpAction part.
+    /// insert a key-pair. could be a create or delete action. 
+    /// underlying struct should handle the OpAction part.
     fn insert(&mut self, key: &Key, value: Vec<u8>) -> Result<(), Box<dyn Error>>;
-    // delete a key-pair
+    /// delete a key-pair
     fn delete(&mut self, key: &Key) -> Result<(), Box<dyn Error>>;
-    // get a key from cache. do not call this method directly, instead call get.
+    /// get a key from cache. do not call this method directly, instead call get.
     fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
-    // get a key from the underlying storage. do not call this method directly, instead call get. If the key is not in the storage, it will return an error.
+    /// get a key from the underlying storage. do not call this method directly, instead call get. If the key is not in the storage, it will return an error.
     fn get_from_db(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>; 
-    // commit last tx changes within the cache
+    /// commit last tx changes within the cache
     fn commit_last_tx(&mut self) -> Result<(), Box<dyn Error>>;
-    // commit changes to the unfinalized map.
+    /// commit changes to the unfinalized map.
     fn commit(&mut self) -> Result<(), Box<dyn Error>>;
-    // rollback last tx changes within the cache.
+    /// rollback last tx changes within the cache.
     fn rollback_last_tx(&mut self) -> Result<(), Box<dyn Error>>;
-    // rollback entirely.
+    /// rollback entirely.
     fn rollback(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
 pub struct InMemoryCachingTransactionalDb<'a> {
-    // cache is init'ed at the start.
-    pub cache: & 'a mut HashMap<Key, Op>,
-    // unfinalized changes from previous block(s).
-    pub unfinalized: & 'a mut HashMap<Key, Op>,
-    // set of all key value changes from last init. 
+    /// cache is init'ed at the start.
+    pub cache: &'a mut HashMap<Key, Op>,
+    /// unfinalized changes from previous block(s).
+    pub unfinalized: &'a mut HashMap<Key, Op>,
+    /// set of all key value changes from last init. 
     pub touched: HashMap<Key, Op>, 
-    // set of all key value changes from last commit_last_tx
+    /// set of all key value changes from last commit_last_tx
     pub touched_tx: HashMap<Key, Op>,
-    // underlying database.
+    /// underlying database.
     pub db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>, 
 }
 
 impl<'a> InMemoryCachingTransactionalDb<'a> {
-    pub fn new(cache: & 'a mut HashMap<Key, Op>, unfinalized: & 'a mut HashMap<Key, Op>, db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>) -> InMemoryCachingTransactionalDb<'a> {
+    pub fn new(cache: &'a mut HashMap<Key, Op>, unfinalized: &'a mut HashMap<Key, Op>, db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>) -> Self {
         Self{
             cache: cache,
             unfinalized: unfinalized,
