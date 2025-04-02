@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use crate::database::Database;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub type Key = [u8; 33];
 
@@ -32,9 +32,9 @@ pub struct Op{
 }
 
 /// Implements finalization to database out of TransactionalDb trait.
-pub trait TransactionalDb<'a> {
+pub trait TransactionalDb {
     /// initialize the cache with an already available hashmap of key-value pairs.
-    fn init_cache(&mut self, cache: & 'a mut HashMap<Key, Op>);
+    fn init_cache(&mut self, cache: Arc<Mutex<HashMap<Key, Op>>>);
     /// get the value corresponding to the key. 
     /// use this method for querying state.
     fn get(&mut self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
@@ -57,21 +57,21 @@ pub trait TransactionalDb<'a> {
     fn rollback(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
-pub struct InMemoryCachingTransactionalDb<'a> {
+pub struct InMemoryCachingTransactionalDb {
     /// cache is init'ed at the start.
-    pub cache: &'a mut HashMap<Key, Op>,
+    pub cache:Arc<Mutex<HashMap<Key, Op>>>,
     /// unfinalized changes from previous block(s).
-    pub unfinalized: &'a mut HashMap<Key, Op>,
+    pub unfinalized:Arc<Mutex<HashMap<Key, Op>>>,
     /// set of all key value changes from last init. 
     pub touched: HashMap<Key, Op>, 
     /// set of all key value changes from last commit_last_tx
     pub touched_tx: HashMap<Key, Op>,
     /// underlying database.
-    pub db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>, 
+    pub db: Arc<Mutex<dyn Database + Send + Sync>>, 
 }
 
-impl<'a> InMemoryCachingTransactionalDb<'a> {
-    pub fn new(cache: &'a mut HashMap<Key, Op>, unfinalized: &'a mut HashMap<Key, Op>, db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>) -> Self {
+impl InMemoryCachingTransactionalDb {
+    pub fn new(cache: Arc<Mutex<HashMap<Key, Op>>>, unfinalized: Arc<Mutex<HashMap<Key, Op>>>, db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>) -> Self {
         Self{
             cache: cache,
             unfinalized: unfinalized,
@@ -82,8 +82,8 @@ impl<'a> InMemoryCachingTransactionalDb<'a> {
     }
 }
 
-impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
-    fn init_cache(&mut self, cache: & 'a mut HashMap<Key, Op>) {
+impl TransactionalDb for InMemoryCachingTransactionalDb {
+    fn init_cache(&mut self, cache: Arc<Mutex<HashMap<Key, Op>>>) {
         self.cache = cache;
     }
 
@@ -108,7 +108,7 @@ impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
                     }
                     // key is not used in the current block.
                     None => {
-                        match self.unfinalized.get(key) {
+                        match self.unfinalized.lock().unwrap().get(key) {
                             // the key is used in the previous block(s). but the blocks did nt finalze yet.
                             Some(u_op) => {
                                 let v = Op { 
@@ -165,7 +165,7 @@ impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
     }
 
     fn get_from_cache(&self, key: &Key) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        self.cache.get(key)
+        self.cache.lock().unwrap().get(key)
             .map(|op| Some(op.value.clone()))
             .ok_or_else(|| "Key not found in cache.".into())
     }
@@ -177,13 +177,13 @@ impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
     }
 
     fn commit_last_tx(&mut self) -> Result<(), Box<dyn Error>> {
-        merge_maps(&mut self.touched, &self.touched_tx);
+        merge_maps_nl(&mut self.touched, &self.touched_tx);
         self.touched_tx.clear();
         Ok(())
     }
 
     fn commit(&mut self) -> Result<(), Box<dyn Error>> {
-        merge_maps(&mut self.unfinalized, &self.touched);
+        merge_maps(Arc::clone(&self.unfinalized), &mut self.touched);
         self.touched.clear();
         Ok(())
     }
@@ -199,7 +199,62 @@ impl<'a> TransactionalDb<'a> for InMemoryCachingTransactionalDb<'a> {
     }
 }
 
-pub fn merge_maps<'a, 'b>(map1: & 'a mut HashMap<Key, Op>, map2: & 'b HashMap<Key, Op>) -> & 'a mut HashMap<Key, Op> {
+pub fn merge_maps_l(map1: Arc<Mutex<HashMap<Key, Op>>>, map2: Arc<Mutex<HashMap<Key, Op>>>) -> Arc<Mutex<HashMap<Key, Op>>> {
+    let mut map1_g = map1.lock().unwrap();
+    let map2_g = map2.lock().unwrap();
+    for (key, op) in map2_g.iter() {
+        if let Some(existing_op) = map1_g.get(key) {
+            // there is a key existing in both maps.
+            if op.action == OpAction::Delete {
+                map1_g.insert(*key, op.clone());
+            
+            }else if op.action == OpAction::Update {
+                // if op.action is update, then update the map1. as update superseeds everything.
+                map1_g.insert(*key, op.clone());
+            }else if op.action == OpAction::Read && (existing_op.action == OpAction::Update || existing_op.action == OpAction::Create) {
+                // reading on a delete will return a nill value with existing op set to delete. this should not be an issue.
+                let new_op = Op {
+                    action: existing_op.action,
+                    value: op.value.clone(),
+                };
+                map1_g.insert(*key, new_op.clone());
+            }
+        } else {
+            // there is a key not existing in the first map.
+            map1_g.insert(*key, op.clone());
+        }
+    }
+    Arc::clone(&map1)
+}
+
+pub fn merge_maps<'a>(map1: Arc<Mutex<HashMap<Key, Op>>>, map2: &'a mut HashMap<Key, Op>) -> Arc<Mutex<HashMap<Key, Op>>> {
+    let mut map1_g = map1.lock().unwrap();
+    for (key, op) in map2.iter() {
+        if let Some(existing_op) = map1_g.get(key) {
+            // there is a key existing in both maps.
+            if op.action == OpAction::Delete {
+                map1_g.insert(*key, op.clone());
+            
+            }else if op.action == OpAction::Update {
+                // if op.action is update, then update the map1. as update superseeds everything.
+                map1_g.insert(*key, op.clone());
+            }else if op.action == OpAction::Read && (existing_op.action == OpAction::Update || existing_op.action == OpAction::Create) {
+                // reading on a delete will return a nill value with existing op set to delete. this should not be an issue.
+                let new_op = Op {
+                    action: existing_op.action,
+                    value: op.value.clone(),
+                };
+                map1_g.insert(*key, new_op.clone());
+            }
+        } else {
+            // there is a key not existing in the first map.
+            map1_g.insert(*key, op.clone());
+        }
+    }
+    Arc::clone(&map1)
+}
+
+pub fn merge_maps_nl<'a, 'b>(map1: & 'a mut HashMap<Key, Op>, map2: & 'b HashMap<Key, Op>) -> & 'a mut HashMap<Key, Op> {
     for (key, op) in map2.iter() {
         if let Some(existing_op) = map1.get(key) {
             // there is a key existing in both maps.
@@ -232,8 +287,8 @@ mod tests {
     use std::sync::Mutex;
     #[test]
     fn test_it_works() {
-        let mut cache: HashMap<Key, Op> = HashMap::new();
-        let mut unfinalized: HashMap<Key, Op> = HashMap::new();
+        let mut cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let mut unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let db = Arc::new(Mutex::new(HashmapDatabase::new()));
         let key1 = [1; 33];
         let value1 = [1; 33];
@@ -241,14 +296,14 @@ mod tests {
         let value2 = [2; 33];
         db.lock().unwrap().put(&key1, &value1).unwrap();
         {
-            let mut in_mem_db = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db.clone());
+            let mut in_mem_db = InMemoryCachingTransactionalDb::new(Arc::clone(&cache), Arc::clone(&unfinalized), db.clone());
 
             // start a tx
             assert_eq!(in_mem_db.get(&key1).unwrap(), Some(value1.to_vec()));
             // end a tx
             assert_eq!(in_mem_db.touched_tx.len(), 1);
             assert_eq!(in_mem_db.touched.len(),0);
-            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
             assert_eq!(in_mem_db.touched_tx.get(&key1).unwrap(), &Op{
                 action: OpAction::Read,
                 value: value1.to_vec(),
@@ -257,7 +312,7 @@ mod tests {
             let _ = in_mem_db.commit_last_tx();
             assert_eq!(in_mem_db.touched_tx.len(), 0);
             assert_eq!(in_mem_db.touched.len(),1);
-            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
             assert_eq!(in_mem_db.touched.get(&key1).unwrap(), &Op{
                 action: OpAction::Read,
                 value: value1.to_vec(),
@@ -266,7 +321,7 @@ mod tests {
             in_mem_db.insert(&key2, value2.to_vec()).unwrap();
             assert_eq!(in_mem_db.touched_tx.len(), 1);
             assert_eq!(in_mem_db.touched.len(), 1);
-            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
             assert_eq!(in_mem_db.touched_tx.get(&key2).unwrap(), &Op{
                 action: OpAction::Update,
                 value: value2.to_vec(),
@@ -279,40 +334,40 @@ mod tests {
             assert_eq!(in_mem_db.get(&key2).unwrap(), Some(value2.to_vec()));
             assert_eq!(in_mem_db.touched_tx.len(), 1);
             assert_eq!(in_mem_db.touched.len(), 1);
-            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
             // commit tx
             let _ = in_mem_db.commit_last_tx().unwrap();
             assert_eq!(in_mem_db.touched_tx.len(), 0);
             assert_eq!(in_mem_db.touched.len(), 2);
-            assert_eq!(in_mem_db.cache.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
             // commit block
             let _ = in_mem_db.commit().unwrap();
             assert_eq!(in_mem_db.touched_tx.len(), 0);
             assert_eq!(in_mem_db.touched.len(), 0);
-            assert_eq!(in_mem_db.cache.len(), 0);
-            assert_eq!(in_mem_db.unfinalized.len(), 2);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 0);
+            assert_eq!(in_mem_db.unfinalized.lock().unwrap().len(), 2);
         }
         // implement finalize out of db trait.
-        assert_eq!(unfinalized.len(), 2);
-        assert_eq!(cache.len(), 0);
-        for (key, op) in unfinalized.iter() {
+        assert_eq!(unfinalized.lock().unwrap().len(), 2);
+        assert_eq!(cache.lock().unwrap().len(), 0);
+        for (key, op) in unfinalized.lock().unwrap().iter() {
             if op.action == OpAction::Delete {
                 db.lock().unwrap().delete(key).unwrap();
             } else if op.action == OpAction::Update {
                 db.lock().unwrap().put(key, &op.value).unwrap();
             } 
         }
-        merge_maps(&mut cache, &unfinalized);
-        assert_eq!(cache.len(), 2);
-        unfinalized.clear();
-        assert_eq!(unfinalized.len(), 0);
+        merge_maps_l(Arc::clone(&cache), Arc::clone(&unfinalized));
+        assert_eq!(cache.lock().unwrap().len(), 2);
+        unfinalized.lock().unwrap().clear();
+        assert_eq!(unfinalized.lock().unwrap().len(), 0);
         // try fetching key2 from db. this should pass.
         assert_eq!(db.lock().unwrap().get(&key2).unwrap(), Some(value2.to_vec()));
         // try fetching key1 from db. this should pass.
         assert_eq!(db.lock().unwrap().get(&key1).unwrap(), Some(value1.to_vec()));
         // new block
         {
-            let mut in_mem_db = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db.clone());
+            let mut in_mem_db = InMemoryCachingTransactionalDb::new(Arc::clone(&cache), Arc::clone(&unfinalized), db.clone());
             assert_eq!(db.lock().unwrap().get(&key1).unwrap(), Some(value1.to_vec()));
             assert_eq!(in_mem_db.get(&key1).unwrap(), Some(value1.to_vec()));
             assert_eq!(in_mem_db.get(&key2).unwrap(), Some(value2.to_vec()));
@@ -320,8 +375,8 @@ mod tests {
             in_mem_db.delete(&key1).unwrap();
             assert_eq!(in_mem_db.touched_tx.len(), 2);
             assert_eq!(in_mem_db.touched.len(), 0);
-            assert_eq!(in_mem_db.cache.len(), 2);
-            assert_eq!(in_mem_db.unfinalized.len(), 0);
+            assert_eq!(in_mem_db.cache.lock().unwrap().len(), 2);
+            assert_eq!(in_mem_db.unfinalized.lock().unwrap().len(), 0);
             assert_eq!(in_mem_db.touched_tx.get(&key1).unwrap(), &Op{
                 action: OpAction::Delete,
                 value: vec![],

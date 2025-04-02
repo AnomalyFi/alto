@@ -5,6 +5,7 @@ use super::{
 };
 use crate::actors::syncer;
 use alto_types::{Block, Finalization, Notarization, Seed};
+use alto_storage::{database::Database, transactional_db::{Key, Op}};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
@@ -19,8 +20,7 @@ use futures::{
 };
 use rand::Rng;
 use std::{
-    pin::Pin,
-    sync::{Arc, Mutex},
+    collections::HashMap, pin::Pin, sync::{Arc, Mutex}
 };
 use tracing::{info, warn};
 
@@ -58,6 +58,10 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
     prover: Prover<Digest>,
     hasher: Sha256,
     mailbox: mpsc::Receiver<Message>,
+    state_cache: Arc<Mutex<HashMap<Key, Op>>>,
+    unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    staete_db: Arc<Mutex<dyn Database + Send + Sync>>,
+
 }
 
 impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
@@ -70,6 +74,9 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 prover: config.prover,
                 hasher: Sha256::new(),
                 mailbox,
+                state_cache: config.state_cache,
+                unfinalized_state: config.unfinalized_state,
+                staete_db: config.state_db,
             },
             Supervisor::new(config.identity, config.participants, config.share),
             Mailbox::new(sender),

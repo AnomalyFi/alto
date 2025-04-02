@@ -1,5 +1,10 @@
 use commonware_cryptography::{bls12381::primitives::group, ed25519::PublicKey};
 use governor::Quota;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use alto_storage::{database::Database, transactional_db::{Key, Op}};
 
 mod actor;
 mod archive;
@@ -33,4 +38,9 @@ pub struct Config<I: Indexer> {
     pub activity_timeout: u64,
 
     pub indexer: Option<I>,
+
+    // State
+    pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
+    pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }

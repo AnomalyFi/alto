@@ -4,6 +4,8 @@ use commonware_cryptography::{
     ed25519::PublicKey,
     sha256::Digest,
 };
+use std::{collections::HashMap, sync::{Arc, Mutex}};
+use alto_storage::{database::Database, transactional_db::{Key, Op}};
 
 mod actor;
 pub use actor::Actor;
@@ -29,4 +31,9 @@ pub struct Config {
     /// Number of messages from consensus to hold in our backlog
     /// before blocking.
     pub mailbox_size: usize,
+
+    /// State 
+    pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
+    pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }

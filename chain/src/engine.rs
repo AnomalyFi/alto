@@ -93,6 +93,9 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 identity: cfg.identity.clone(),
                 share: cfg.share,
                 mailbox_size: cfg.mailbox_size,
+                state_cache: Arc::clone(&state_cache),
+                unfinalized_state: Arc::clone(&unfinalized_state),
+                state_db: Arc::clone(&cfg.state_db),
             },
         );
 
@@ -108,6 +111,9 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 backfill_quota: cfg.backfill_quota,
                 activity_timeout: cfg.activity_timeout,
                 indexer: cfg.indexer,
+                state_cache: Arc::clone(&state_cache),
+                unfinalized_state: Arc::clone(&unfinalized_state),
+                state_db: Arc::clone(&cfg.state_db),
             },
         )
         .await;
