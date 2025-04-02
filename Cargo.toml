@@ -11,7 +11,7 @@ resolver = "2"
 
 [workspace.dependencies]
 alto-client = { version = "0.0.6", path = "client" }
-alto-types = { version = "0.0.6", path = "types" }
+alto-types = { version = "0.0.4", path = "types" }
 alto-actions = { version = "0.1.0", path = "actions"}
 alto-storage = { version = "0.1.0", path = "storage"}
 alto-chain = { version = "0.0.6", path = "chain"}
@@ -27,6 +27,7 @@ commonware-runtime = { version = "0.0.43" }
 commonware-storage = { version = "0.0.43" }
 commonware-stream = { version = "0.0.43" }
 commonware-utils = { version = "0.0.43" }
+commonware-codec = { version = "0.0.40"}
 thiserror = "2.0.12"
 bytes = "1.7.1"
 rand = "0.8.5"

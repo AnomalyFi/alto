@@ -123,7 +123,7 @@ version = "0.1.0"
 dependencies = [
  "alto-types",
  "bytes",
- "commonware-codec",
+ "commonware-codec 0.0.43",
  "commonware-cryptography",
  "rand 0.8.5",
  "rocksdb",
@@ -132,10 +132,10 @@ dependencies = [
 
 [[package]]
 name = "alto-types"
-version = "0.0.6"
+version = "0.0.4"
 dependencies = [
  "bytes",
- "commonware-codec",
+ "commonware-codec 0.0.40",
  "commonware-cryptography",
  "commonware-utils",
  "getrandom 0.2.15",
@@ -929,6 +929,17 @@ dependencies = [
  "rand 0.8.5",
  "thiserror 2.0.12",
  "tracing",
+]
+
+[[package]]
+name = "commonware-codec"
+version = "0.0.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ea2a8daeca3c1346a30a4c92af7791b1c37e669fad9e1907203e2cc6f92eec7"
+dependencies = [
+ "bytes",
+ "paste",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

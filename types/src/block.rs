@@ -1,9 +1,12 @@
+use crate::signed_tx::{pack_signed_txs, unpack_signed_txs, SignedTx, SignedTxChars};
 use crate::{Finalization, Notarization};
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{bls12381::PublicKey, sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{bls12381::PublicKey, sha256, sha256::Digest, Hasher, Sha256};
 use commonware_utils::{Array, SizedSerialize};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+// @todo add state root, fee manager and results to the block struct.
+// what method of state root generation should be used?
+#[derive(Clone, Debug)]
 pub struct Block {
     /// The parent block's digest.
     pub parent: Digest,
@@ -14,25 +17,52 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
+    /// The raw transactions in the block.
+    pub raw_txs: Vec<u8>,
+
+    /// The state root of the block.
+    pub state_root: Digest,
+
+    txs: Vec<SignedTx>,
     /// Pre-computed digest of the block.
     digest: Digest,
 }
 
 impl Block {
-    fn compute_digest(parent: &Digest, height: u64, timestamp: u64) -> Digest {
+    fn compute_digest(
+        parent: &Digest,
+        height: u64,
+        timestamp: u64,
+        raw_txs: Vec<u8>,
+        state_root: &Digest,
+    ) -> Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
+        hasher.update(&raw_txs);
+        hasher.update(state_root);
         hasher.finalize()
     }
 
-    pub fn new(parent: Digest, height: u64, timestamp: u64) -> Self {
-        let digest = Self::compute_digest(&parent, height, timestamp);
+    pub fn new(
+        parent: Digest,
+        height: u64,
+        timestamp: u64,
+        txs: Vec<SignedTx>,
+        state_root: Digest,
+    ) -> Self {
+        // let mut txs = txs;
+        // @todo this is packing txs in a block.
+        let raw_txs = pack_signed_txs(txs.clone());
+        let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
         Self {
             parent,
             height,
             timestamp,
+            raw_txs,
+            state_root,
+            txs,
             digest,
         }
     }
@@ -42,30 +72,55 @@ impl Block {
         bytes.extend_from_slice(&self.parent);
         bytes.put_u64(self.height);
         bytes.put_u64(self.timestamp);
+        bytes.extend_from_slice(&self.state_root);
+        bytes.extend_from_slice(self.raw_txs.as_slice());
         bytes
     }
 
     pub fn deserialize(mut bytes: &[u8]) -> Option<Self> {
         // Parse the block
-        if bytes.len() != Self::SERIALIZED_LEN {
-            return None;
-        }
+        // if bytes.len() != Self::SERIALIZED_LEN {
+        //     return None;
+        // }
         let parent = Digest::read_from(&mut bytes).ok()?;
         let height = bytes.get_u64();
         let timestamp = bytes.get_u64();
+        let state_root = Digest::read_from(&mut bytes).ok()?;
+        let raw_txs = bytes.to_vec();
+        let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
+        let txs = unpack_signed_txs(raw_txs.clone());
 
         // Return block
-        let digest = Self::compute_digest(&parent, height, timestamp);
         Some(Self {
             parent,
             height,
             timestamp,
+            raw_txs,
+            state_root,
+            txs,
             digest,
         })
     }
 
     pub fn digest(&self) -> Digest {
-        self.digest
+        self.digest.clone()
+    }
+    //todo check logic below
+    pub fn encode(&mut self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(&self.parent);
+        bytes.extend_from_slice(&(self.height.to_be_bytes()));
+        bytes.extend_from_slice(&(self.timestamp.to_be_bytes()));
+        bytes.extend_from_slice(self.raw_txs.as_slice());
+        bytes.extend_from_slice(&self.state_root);
+        // encoding signed txs
+        for tx in self.txs.iter_mut() {
+            bytes.extend_from_slice(&tx.encode());
+        }
+
+        // return encoded digest.
+        self.digest = sha256::hash(&bytes);
+        bytes
     }
 }
 
