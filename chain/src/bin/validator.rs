@@ -8,7 +8,7 @@ use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
         poly,
-    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
+    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme, Sha256
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
@@ -241,9 +241,9 @@ fn main() {
 
         // Create mempool/broadcast/Proof of Availability engine
         let mempool_namespace = b"mempool";
-        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
+        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<Sha256, PublicKey>::new();
         let broadcast_coordinator = mempool::coordinator::Coordinator::new(identity.clone(), peer_keys.clone(), share);
-        let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, sha256::Digest>::new(mempool_namespace, identity_public);
+        let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, Sha256>::new(mempool_namespace, identity_public);
         let (broadcast_engine, broadcast_mailbox) = linked::Engine::new(context.with_label("broadcast_engine"), linked::Config { 
             crypto:  signer.clone(), 
             coordinator: broadcast_coordinator.clone(), 

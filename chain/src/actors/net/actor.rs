@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 use tracing::{debug, event, Level, error};
 use tracing_subscriber::fmt::format;
 
-use crate::actors::mempool::mempool;
+use crate::actors::mempool::mempool::{self, RawTransaction};
 
 use super::ingress::{Mailbox, Message, WebsocketClientMessage};
 
@@ -190,20 +190,24 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
                     match WebsocketClientMessage::deserialize(bin.deref()) {
                         Ok(msg) => {
                             debug!(?msg, "received msg from client");
-                            let state = state.write().unwrap();
                             match msg {
                                 WebsocketClientMessage::RegisterBlock => {
                                     println!("adding block listener {}", client_id);
+                                    let state = state.write().unwrap();
                                     state.block_listeners.write().unwrap().insert(client_id.clone());
                                 }, 
                                 WebsocketClientMessage::RegisterTx => {
+                                    let state = state.write().unwrap();
                                     state.tx_listeners.write().unwrap().insert(client_id.clone());
                                 }, 
                                 WebsocketClientMessage::SubmitTxs(txs) => {
-                                    let mut mempool = state.mempool.clone();
-                                    let txs: Vec<_> = txs.into_iter().map(|tx| mempool::RawTransaction::<H>::new(tx)).collect();
-                                    // let submission_res = mempool.submit_txs(txs).await;
-                                    // debug!(?submission_res, "txs submission result")
+                                    let mut mempool = {
+                                        let state = state.write().unwrap();
+                                        state.mempool.clone()
+                                    };
+                                    let txs = txs.into_iter().map(|tx| mempool::RawTransaction::<H>::new(tx)).collect();
+                                    let submission_res = mempool.submit_txs(txs).await;
+                                    debug!(?submission_res, "txs submission result")
                                 }
                             }
                         },
@@ -235,8 +239,16 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
         State(state): State<SharedState<R, H>>,
         payload: Bytes,
     ) -> impl IntoResponse {
-        // TODO: send to mempool mailbox
-        format!("submitted")
+        let mut mempool = {
+            state.read().unwrap().mempool.clone()
+        };
+
+        let success = mempool.submit_txs(vec![RawTransaction::new(payload)]).await[0];
+        if success {
+            format!("submitted")
+        } else {
+            format!("failed to submit tx")
+        }
     }
 
 

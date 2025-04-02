@@ -13,10 +13,10 @@ mod tests {
     use commonware_cryptography::{sha256, Sha256};
     use commonware_macros::{test_async, test_traced};
     use commonware_runtime::{tokio::{self, Context, Executor}, Clock, Metrics, Runner, Spawner};
-    use futures::{channel::mpsc, future::join_all, SinkExt, StreamExt};
+    use futures::{channel::mpsc, future::{join_all, try_join_all}, SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::{client, Message as WsClientMessage}};
     use tower::ServiceExt;
-    use tracing_subscriber::field::debug;
+    use tracing_subscriber::{field::debug, fmt::format};
 
     use crate::actors::{mempool::mempool, net::ingress::WebsocketClientMessage};
 
@@ -27,9 +27,9 @@ mod tests {
     fn test_msg() {
         let (runner, mut context) = Executor::init(tokio::Config::default());
         runner.start(async move {
-            let (mempool_sender, mempool_receiver) = mpsc::channel(1024);
+            let (mempool_sender, mut mempool_receiver) = mpsc::channel(1024);
             let mempool_mailbox: mempool::Mailbox<Sha256> = mempool::Mailbox::new(mempool_sender);
-            let (actor, mailbox) = Actor::new(context, actor::Config {
+            let (actor, mailbox) = Actor::new(context.with_label("router"), actor::Config {
                 port: 7890,
                 mempool: mempool_mailbox
             });
@@ -38,11 +38,24 @@ mod tests {
                 panic!("router not initalized");
             };
 
+            let mempool_handler = context.with_label("mock_mempool").spawn(async move |_| {
+                while let Some(msg) = mempool_receiver.next().await {
+                    match msg {
+                        mempool::Message::SubmitTxs { payload, response } => {
+                            print!("received txs from rpc: {:?}", payload);
+                            let _  = response.send(vec![true; payload.len()]);
+                            return;
+                        },
+                        _ => unreachable!()
+                    }
+                }
+            });
+
             // Construct a GET request.
             // Note: the handler expects a payload (a String). Since GET requests normally have no body,
             // you might decide to pass the payload as a query parameter or in the body if that's what you intend.
             // Here, we'll assume the payload is extracted from the request body.
-            let payload = "test payload";
+            let payload = "test-tx";
             let request = Request::builder()
                 .method("GET")
                 .uri("/mempool/submit")
@@ -54,6 +67,7 @@ mod tests {
 
             // Check that the response status is OK.
             assert_eq!(response.status(), StatusCode::OK);
+            let _ = try_join_all(vec![mempool_handler]).await;
         })
     }
     
