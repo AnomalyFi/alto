@@ -1,7 +1,7 @@
-use std::io;
 use axum::response::IntoResponse;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use rand::Rng;
+use std::io;
 use tokio::net::TcpListener;
 use tracing::{event, Level};
 
@@ -11,9 +11,7 @@ pub struct RouterConfig {
 
 impl RouterConfig {
     pub fn default_config() -> RouterConfig {
-        RouterConfig {
-            port: 7844,
-        }
+        RouterConfig { port: 7844 }
     }
 }
 
@@ -48,7 +46,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
 
     pub fn stop(&self) {
         if !self.is_active {
-            return
+            return;
         }
 
         event!(Level::INFO, "stopped router service");
@@ -68,16 +66,22 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
     }
 
     fn init_router(&mut self) {
-    //     let router = axum::Router::new()
-    //         .route("/", get(Router::handle_default))
-    //         .route(Router::PATH_SUBMIT_BLOCK, get(Router::handle_submit_block()));
-    //
-    //     self.router = Some(router)
+        //     let router = axum::Router::new()
+        //         .route("/", get(Router::handle_default))
+        //         .route(Router::PATH_SUBMIT_BLOCK, get(Router::handle_submit_block()));
+        //
+        //     self.router = Some(router)
     }
 
     async fn serve(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let listener = self.listener.take().ok_or("serve failed because listener is None");
-        let router = self.router.take().ok_or("serve failed because router is None");
+        let listener = self
+            .listener
+            .take()
+            .ok_or("serve failed because listener is None");
+        let router = self
+            .router
+            .take()
+            .ok_or("serve failed because router is None");
         axum::serve(listener.unwrap(), router.unwrap()).await?;
         Ok(())
     }
@@ -90,8 +94,8 @@ impl<R: Rng + Spawner + Metrics + Clock> Router<R> {
             Ok(value) => self.listener = Some(value),
             Err(error) => {
                 println!("Error during listener init: {}", error);
-                return
-            },
+                return;
+            }
         }
 
         self.init_router();

@@ -1,7 +1,7 @@
 use alto_chain::{engine, Config};
 use alto_client::Client;
-use alto_types::P2P_NAMESPACE;
 use alto_storage::rocks_db::RocksDbDatabase;
+use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
 use commonware_cryptography::{
@@ -19,6 +19,7 @@ use commonware_utils::{from_hex_formatted, hex, quorum};
 use futures::future::try_join_all;
 use governor::Quota;
 use prometheus_client::metrics::gauge::Gauge;
+use std::sync::{Arc, Mutex};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -30,7 +31,6 @@ use std::{
 };
 use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
-use std::sync::{Arc, Mutex};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
 const METRICS_PORT: u16 = 9090;
@@ -191,7 +191,7 @@ fn main() {
         let state_db = RocksDbDatabase::new_with_path(&config.state_db_directory)
             .expect("Could not create state db");
         let wrapped_state_db = Arc::new(Mutex::new(state_db));
-        
+
         // Create engine
         let config = engine::Config {
             partition_prefix: "engine".to_string(),

@@ -1,7 +1,7 @@
 use crate::address::Address;
-use crate::{PublicKey, TX_NAMESPACE, Signature};
-use crate::wallet::{Wallet, WalletMethods};
 use crate::tx::{Tx, TxMethods};
+use crate::wallet::{Wallet, WalletMethods};
+use crate::{PublicKey, Signature, TX_NAMESPACE};
 use commonware_cryptography::{Ed25519, Scheme};
 // this is sent by the user to the validators.
 #[derive(Clone, Debug)]
@@ -14,7 +14,7 @@ pub struct SignedTx {
 }
 
 // function names are self explanatory.
-pub trait SignedTxChars:Sized {
+pub trait SignedTxChars: Sized {
     fn new(tx: Tx, pub_key: PublicKey, signature: Vec<u8>) -> Self;
     // fn sign(&mut self, wallet: Wallet) -> SignedTx;
     fn verify(&mut self) -> bool;
@@ -22,7 +22,7 @@ pub trait SignedTxChars:Sized {
     fn public_key(&self) -> Vec<u8>;
     fn address(&self) -> Address;
     fn encode(&mut self) -> Vec<u8>;
-    fn decode(bytes: &[u8]) -> Result<Self,String>;
+    fn decode(bytes: &[u8]) -> Result<Self, String>;
 }
 
 impl SignedTxChars for SignedTx {
@@ -72,23 +72,29 @@ impl SignedTxChars for SignedTx {
     }
 
     // @todo add syntactic checks and use methods consume.
-    fn decode(bytes: &[u8]) -> Result<Self, String> { // @todo this method seems untidy.
+    fn decode(bytes: &[u8]) -> Result<Self, String> {
+        // @todo this method seems untidy.
 
         let raw_tx_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-        let raw_tx = &bytes[8..8+raw_tx_len as usize];
-        let pub_key = &bytes[8+raw_tx_len as usize..8+raw_tx_len as usize+32];
-        let signature = &bytes[8+raw_tx_len as usize+32..];
+        let raw_tx = &bytes[8..8 + raw_tx_len as usize];
+        let pub_key = &bytes[8 + raw_tx_len as usize..8 + raw_tx_len as usize + 32];
+        let signature = &bytes[8 + raw_tx_len as usize + 32..];
         let public_key = PublicKey::try_from(pub_key);
         if public_key.is_err() {
             return Err(public_key.unwrap_err().to_string());
         }
         let public_key = public_key.unwrap();
         let tx = Tx::decode(raw_tx);
-        if tx.is_err(){
-           return Err(tx.unwrap_err());
+        if tx.is_err() {
+            return Err(tx.unwrap_err());
         }
 
-        Ok(SignedTx { tx: tx.unwrap(), pub_key: public_key.clone(), address: Address::from_pub_key(&public_key), signature: signature.to_vec() })
+        Ok(SignedTx {
+            tx: tx.unwrap(),
+            pub_key: public_key.clone(),
+            address: Address::from_pub_key(&public_key),
+            signature: signature.to_vec(),
+        })
     }
 }
 
@@ -138,13 +144,13 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use commonware_cryptography::bls12381::primitives::ops::keypair;
-    use commonware_cryptography::sha256::Digest;
-    use more_asserts::assert_gt;
-    use crate::{create_test_keypair, curr_timestamp};
+
+    use super::*;
     use crate::tx::Unit;
     use crate::units::transfer::Transfer;
-    use super::*;
+    use crate::{create_test_keypair, curr_timestamp};
+    use commonware_cryptography::sha256::Digest;
+    use more_asserts::assert_gt;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
@@ -153,13 +159,13 @@ mod tests {
         let priority_fee = 75;
         let chain_id = 45205;
         let transfer = Transfer::new();
-        let units : Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
-        let mut digest: [u8; 32] = [0; 32];
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
         let (pk, sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
-        let mut tx = Tx {
+        let tx = Tx {
             timestamp,
             max_fee,
             priority_fee,
@@ -176,7 +182,7 @@ mod tests {
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let mut decoded_msg = SignedTx::decode(&encoded_bytes)?;
+        let decoded_msg = SignedTx::decode(&encoded_bytes)?;
         assert_eq!(origin_msg.pub_key, decoded_msg.pub_key);
         assert_eq!(origin_msg.address, decoded_msg.address);
         assert_eq!(origin_msg.signature, decoded_msg.signature);
@@ -184,4 +190,3 @@ mod tests {
         Ok(())
     }
 }
-

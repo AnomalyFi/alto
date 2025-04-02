@@ -82,8 +82,8 @@ pub struct Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alto_types::{Finalized, Notarized, Seed};
     use alto_storage::rocks_db::RocksDbDatabase;
+    use alto_types::{Finalized, Notarized, Seed};
     use bls12381::primitives::poly;
     use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
     use commonware_macros::test_traced;
@@ -96,7 +96,7 @@ mod tests {
     use engine::{Config, Engine};
     use governor::Quota;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tracing_subscriber::fmt::format;
+
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
@@ -267,7 +267,10 @@ mod tests {
                 // Create scheme context
                 let public_key = scheme.public_key();
                 public_keys.insert(public_key.clone());
-                let state_db = RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", idx).as_str()).expect("Could not create state db");
+                let state_db = RocksDbDatabase::new_with_path(
+                    format!("/home/ubuntu/state_db/{}", idx).as_str(),
+                )
+                .expect("Could not create state db");
                 let wrapped_state_db = Arc::new(Mutex::new(state_db));
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
@@ -430,7 +433,10 @@ mod tests {
                 // Configure engine
                 let public_key = scheme.public_key();
                 let uid = format!("validator-{}", public_key);
-                let state_db = RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", idx).as_str()).expect("Could not create state db");
+                let state_db = RocksDbDatabase::new_with_path(
+                    format!("/home/ubuntu/state_db/{}", idx).as_str(),
+                )
+                .expect("Could not create state db");
                 let wrapped_state_db = Arc::new(Mutex::new(state_db));
                 let config: Config<MockIndexer> = engine::Config {
                     partition_prefix: uid.clone(),
@@ -516,7 +522,9 @@ mod tests {
             let share = shares[0];
             let public_key = scheme.public_key();
             let uid = format!("validator-{}", public_key);
-            let state_db = RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", uid).as_str()).expect("Could not create state db");
+            let state_db =
+                RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", uid).as_str())
+                    .expect("Could not create state db");
             let wrapped_state_db = Arc::new(Mutex::new(state_db));
             let config: Config<MockIndexer> = engine::Config {
                 partition_prefix: uid.clone(),
@@ -649,7 +657,10 @@ mod tests {
                         // Create scheme context
                         let public_key = scheme.public_key();
                         public_keys.insert(public_key.clone());
-                        let state_db = RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", idx).as_str()).expect("Could not create state db");
+                        let state_db = RocksDbDatabase::new_with_path(
+                            format!("/home/ubuntu/state_db/{}", idx).as_str(),
+                        )
+                        .expect("Could not create state db");
                         let wrapped_state_db = Arc::new(Mutex::new(state_db));
                         // Configure engine
                         let uid = format!("validator-{}", public_key);
@@ -797,7 +808,10 @@ mod tests {
 
                 // Configure engine
                 let uid = format!("validator-{}", public_key);
-                let state_db = RocksDbDatabase::new_with_path(format!("/home/ubuntu/state_db/{}", idx).as_str()).expect("Could not create state db");
+                let state_db = RocksDbDatabase::new_with_path(
+                    format!("/home/ubuntu/state_db/{}", idx).as_str(),
+                )
+                .expect("Could not create state db");
                 let wrapped_state_db = Arc::new(Mutex::new(state_db));
                 let config: Config<MockIndexer> = engine::Config {
                     partition_prefix: uid.clone(),

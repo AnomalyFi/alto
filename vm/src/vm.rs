@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
-use alto_storage::transactional_db::InMemoryCachingTransactionalDb;
-use alto_storage::{transactional_db::{TransactionalDb, Key, Op}, database::Database};
+use alto_storage::{
+    database::Database,
+    transactional_db::{Key, Op},
+};
 use alto_types::tx::Tx;
 
 pub struct VM {
@@ -41,7 +43,4 @@ impl VM {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-}
+mod tests {}

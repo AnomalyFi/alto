@@ -1,5 +1,9 @@
+use crate::{
+    address::Address,
+    state::State,
+    tx::{Unit, UnitContext, UnitType},
+};
 use std::any::Any;
-use crate::{address::Address, tx::{Unit, UnitType, UnitContext}, state::State};
 
 #[derive(Clone, Debug)]
 pub struct SequencerMsg {
@@ -24,7 +28,7 @@ impl Unit for SequencerMsg {
     }
 
     fn encode(&self) -> Vec<u8> {
-        let mut bytes:Vec<u8> = Vec::new();
+        let mut bytes: Vec<u8> = Vec::new();
         // data length is 8 bytes.
         let data_len = self.data.len() as u64;
         // chain id length is 8 bytes.n store chain id.
@@ -72,14 +76,14 @@ impl Default for SequencerMsg {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-    use more_asserts::assert_gt;
     use super::*;
+    use more_asserts::assert_gt;
+    use std::error::Error;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
         let chain_id = 4502;
-        let data = vec!(0xDE, 0xAD, 0xBE, 0xEF);
+        let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let from_address = Address::create_random_address();
         let relayer_id = 1;
         let origin_msg = SequencerMsg {

@@ -1,4 +1,4 @@
-use crate::transactional_db::{InMemoryCachingTransactionalDb, TransactionalDb};
+use crate::transactional_db::TransactionalDb;
 use alto_types::account::{Account, Balance};
 use alto_types::address::Address;
 use bytes::Bytes;
@@ -26,7 +26,9 @@ impl<'a> StateDb<'a> {
             if let Some(value) = v {
                 let bytes = Bytes::from(value);
                 let mut read_buf = ReadBuffer::new(bytes);
-                Account::read(&mut read_buf).map(Some).map_err(|e| Box::new(e) as Box<dyn Error>)
+                Account::read(&mut read_buf)
+                    .map(Some)
+                    .map_err(|e| Box::new(e) as Box<dyn Error>)
             } else {
                 Err("Account not found".into())
             }
@@ -42,9 +44,9 @@ impl<'a> StateDb<'a> {
 
     pub fn get_balance(&mut self, address: &Address) -> Option<Balance> {
         match self.get_account(address) {
-            Ok(Some(acc)) => Some(acc.balance),  // return balance if account exists
-            Ok(None) => Some(0),  // return 0 if no account
-            Err(_) => None,  // return none if an err occurred
+            Ok(Some(acc)) => Some(acc.balance), // return balance if account exists
+            Ok(None) => Some(0),                // return 0 if no account
+            Err(_) => None,                     // return none if an err occurred
         }
     }
 
@@ -73,25 +75,29 @@ impl<'a> StateDb<'a> {
 
 #[cfg(test)]
 mod tests {
-    use alto_types::address::Address;
-    use crate::hashmap_db::HashmapDatabase;
-    use crate::transactional_db::{InMemoryCachingTransactionalDb, Op, Key};
     use super::*;
+    use crate::hashmap_db::HashmapDatabase;
+    use crate::transactional_db::{InMemoryCachingTransactionalDb, Key, Op};
+    use alto_types::address::Address;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_it_works() {
         // setup state db
-        let cache: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
-        let unfinalized: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
+        let cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let db = Arc::new(Mutex::new(HashmapDatabase::new()));
-        let mut in_mem = InMemoryCachingTransactionalDb::new(Arc::clone(&cache),Arc::clone(&unfinalized), db);
+        let mut in_mem =
+            InMemoryCachingTransactionalDb::new(Arc::clone(&cache), Arc::clone(&unfinalized), db);
 
         let address = Address::create_random_address();
-        let account = Account{address: address.clone(), balance: 1000};
+        let account = Account {
+            address: address.clone(),
+            balance: 1000,
+        };
         let mut state_db = StateDb::new(&mut in_mem);
-        let _ = state_db.set_account(&account).unwrap(); 
+        state_db.set_account(&account).unwrap();
         let _ = in_mem.commit_last_tx();
         let _ = in_mem.commit();
         assert_eq!(unfinalized.lock().unwrap().len(), 1);
@@ -104,10 +110,11 @@ mod tests {
     #[should_panic]
     fn test_no_account_earlier() {
         // setup state db
-        let cache: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
-        let unfinalized: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
+        let cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let db = Arc::new(Mutex::new(HashmapDatabase::new()));
-        let mut in_mem = InMemoryCachingTransactionalDb::new(Arc::clone(&cache),Arc::clone(&unfinalized), db);
+        let mut in_mem =
+            InMemoryCachingTransactionalDb::new(Arc::clone(&cache), Arc::clone(&unfinalized), db);
 
         let address = Address::create_random_address();
 

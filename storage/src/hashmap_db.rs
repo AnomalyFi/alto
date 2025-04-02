@@ -1,6 +1,6 @@
+use crate::database::Database;
 use std::collections::HashMap;
 use std::error::Error;
-use crate::database::Database;
 
 pub struct HashmapDatabase {
     data: HashMap<String, String>,
@@ -31,9 +31,9 @@ impl Database for HashmapDatabase {
 
     fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         let str_key: String = String::from_utf8(key.into()).unwrap();
-        self.data.get(&str_key).map_or(
-            Ok(None),
-            |v| Ok(Some(v.clone().into())))
+        self.data
+            .get(&str_key)
+            .map_or(Ok(None), |v| Ok(Some(v.clone().into())))
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -42,7 +42,6 @@ impl Database for HashmapDatabase {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

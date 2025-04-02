@@ -2,6 +2,10 @@ use crate::{
     actors::{application, syncer},
     Indexer,
 };
+use alto_storage::{
+    database::Database,
+    transactional_db::{Key, Op},
+};
 use alto_types::NAMESPACE;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus, Prover};
 use commonware_cryptography::{
@@ -17,10 +21,9 @@ use futures::future::try_join_all;
 use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
-use std::time::Duration;
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use alto_storage::{transactional_db::{Key, Op}, database::Database};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{error, warn};
 
 pub struct Config<I: Indexer> {
@@ -50,7 +53,7 @@ pub struct Config<I: Indexer> {
 pub struct Engine<
     B: Blob,
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics,
-    I: Indexer, 
+    I: Indexer,
 > {
     context: E,
 
@@ -71,7 +74,7 @@ pub struct Engine<
     // state
     state_cache: Arc<Mutex<HashMap<Key, Op>>>,
     unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
-    state_db: Arc<Mutex<dyn Database+Send+Sync>>,
+    state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
 impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics, I: Indexer>
@@ -80,8 +83,8 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
     pub async fn new(context: E, cfg: Config<I>) -> Self {
         // @todo initalizing state cache and unfinalized state.
         // if it is necessary pass state_cache, unfinalized_state and state_db to both application and syncer.
-        let state_cache:Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
-        let unfinalized_state:Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let state_cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized_state: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
 
         // Create the application
         let public = public(&cfg.identity);

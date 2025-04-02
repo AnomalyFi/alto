@@ -1,7 +1,7 @@
-use std::any::Any;
 use crate::address::Address;
 use crate::state::State;
-use crate::tx::{Unit, UnitType, UnitContext};
+use crate::tx::{Unit, UnitContext, UnitType};
+use std::any::Any;
 
 const MAX_MEMO_SIZE: usize = 256;
 
@@ -50,7 +50,7 @@ impl Unit for Transfer {
         if memo_len > 0 {
             bytes.extend_from_slice(&self.memo);
         }
-        
+
         bytes
     }
 
@@ -89,19 +89,18 @@ impl Default for Transfer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-    use more_asserts::assert_gt;
     use super::*;
+    use more_asserts::assert_gt;
+    use std::error::Error;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
         let from_address = Address::create_random_address();
         let to_address = Address::create_random_address();
         let value = 5;
-        let memo = vec!(0xDE, 0xAD, 0xBE, 0xEF);
+        let memo = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let relayer_id = 1;
         let origin_msg = Transfer {
             from_address,

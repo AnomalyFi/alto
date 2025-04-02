@@ -1,9 +1,9 @@
+use crate::{PublicKey, ADDRESSLEN};
 use more_asserts::assert_le;
 use rand::Rng;
-use crate::{PublicKey, ADDRESSLEN};
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub struct Address(pub [u8;ADDRESSLEN]);
+pub struct Address(pub [u8; ADDRESSLEN]);
 
 impl Address {
     pub fn new(slice: &[u8]) -> Self {
@@ -36,7 +36,7 @@ impl Address {
     }
 
     pub fn empty() -> Self {
-        Self([0;ADDRESSLEN])
+        Self([0; ADDRESSLEN])
     }
 
     pub fn is_empty(&self) -> bool {
@@ -47,7 +47,7 @@ impl Address {
         &self.0
     }
 
-    pub fn as_bytes(&self) -> &[u8;ADDRESSLEN] {
+    pub fn as_bytes(&self) -> &[u8; ADDRESSLEN] {
         &self.0
     }
 }

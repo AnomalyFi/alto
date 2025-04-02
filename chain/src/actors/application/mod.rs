@@ -1,18 +1,24 @@
+use alto_storage::{
+    database::Database,
+    transactional_db::{Key, Op},
+};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{
     bls12381::primitives::{group, poly::Poly},
     ed25519::PublicKey,
     sha256::Digest,
 };
-use std::{collections::HashMap, sync::{Arc, Mutex}};
-use alto_storage::{database::Database, transactional_db::{Key, Op}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 mod actor;
 pub use actor::Actor;
 mod ingress;
 pub use ingress::Mailbox;
-mod supervisor;
 mod router;
+mod supervisor;
 
 pub use supervisor::Supervisor;
 
@@ -32,7 +38,7 @@ pub struct Config {
     /// before blocking.
     pub mailbox_size: usize,
 
-    /// State 
+    /// State
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
     pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,

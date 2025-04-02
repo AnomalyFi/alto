@@ -4,8 +4,11 @@ use super::{
     Config,
 };
 use crate::actors::syncer;
+use alto_storage::{
+    database::Database,
+    transactional_db::{Key, Op},
+};
 use alto_types::{Block, Finalization, Notarization, Seed};
-use alto_storage::{database::Database, transactional_db::{Key, Op}};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
@@ -20,7 +23,9 @@ use futures::{
 };
 use rand::Rng;
 use std::{
-    collections::HashMap, pin::Pin, sync::{Arc, Mutex}
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, Mutex},
 };
 use tracing::{info, warn};
 
@@ -61,7 +66,6 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
     state_cache: Arc<Mutex<HashMap<Key, Op>>>,
     unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
     staete_db: Arc<Mutex<dyn Database + Send + Sync>>,
-
 }
 
 impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
@@ -92,16 +96,16 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
-        let genesis_state_root  = [0u8;32];
+        let genesis_state_root = [0u8; 32];
         let genesis = Block::new(genesis_parent, 0, 0, Vec::new(), genesis_state_root.into());
         let genesis_digest = genesis.digest();
-        // --> prepared the genesis digest. 
+        // --> prepared the genesis digest.
 
         // there are no blocks built, while genesis.
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
         // @todo initiate fee manager here.
-        // @todo get the state view. 
+        // @todo get the state view.
         // @todo init the database.
         // @todo commit to database.
         while let Some(message) = self.mailbox.next().await {
@@ -112,7 +116,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     // payload.
                     let _ = response.send(genesis_digest.clone());
                 }
-                // its this validators turn to propose the block. 
+                // its this validators turn to propose the block.
                 // So, it should check for available blocks and propose a block.
                 Message::Propose {
                     view,
@@ -221,7 +225,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         let _ = response.send(false);
                                         return;
                                     }
-                                    //@todo unmarshall txs, execute txs, generate state root, collect fees, build state root, verify state root. 
+                                    //@todo unmarshall txs, execute txs, generate state root, collect fees, build state root, verify state root.
 
                                     // Persist the verified block
                                     syncer.verified(view, block).await;

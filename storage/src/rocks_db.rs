@@ -1,6 +1,6 @@
-use std::error::Error;
-use rocksdb::{DB, Options};
 use crate::database::Database;
+use rocksdb::{Options, DB};
+use std::error::Error;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -29,7 +29,6 @@ impl RocksDbDatabase {
         let db_path = temp_dir.path().join("testdb");
         Self::new_with_path(db_path.to_str().unwrap())
     }
-
 }
 
 impl Database for RocksDbDatabase {

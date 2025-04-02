@@ -2,26 +2,26 @@
 
 mod block;
 
-use std::time::SystemTime;
+pub use block::{Block, Finalized, Notarized};
 use commonware_cryptography::{Ed25519, Scheme};
 use commonware_utils::SystemTimeExt;
-pub use block::{Block, Finalized, Notarized};
+use std::time::SystemTime;
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
-pub mod wasm;
-pub mod wallet;
-pub mod tx;
+pub mod account;
+pub mod address;
 pub mod signed_tx;
 pub mod state;
-pub mod address;
-pub mod account;
+pub mod tx;
 pub mod units;
+pub mod wallet;
+pub mod wasm;
 
 use rand::rngs::OsRng;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
-pub const TX_NAMESPACE:&[u8] = b"_tx_namespace_";
+pub const TX_NAMESPACE: &[u8] = b"_tx_namespace_";
 pub const P2P_NAMESPACE: &[u8] = b"_ALTO_P2P";
 pub const SEED_NAMESPACE: &[u8] = b"_ALTO_SEED";
 pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
@@ -204,7 +204,7 @@ mod tests {
         let parent_digest = hash(&[0; 32]);
         let height = 0;
         let timestamp = 1;
-        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0;32].into());
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
 
         // Create notarization
         let view = 0;

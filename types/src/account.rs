@@ -1,5 +1,5 @@
-use commonware_codec::{Codec, Error, Reader, Writer};
 use crate::address::Address;
+use commonware_codec::{Codec, Error, Reader, Writer};
 
 pub type Balance = u64;
 
@@ -33,7 +33,7 @@ impl Account {
 
 impl Codec for Account {
     fn write(&self, writer: &mut impl Writer) {
-        // @rikoeldon I think we don't need to write account address into the state. 
+        // @rikoeldon I think we don't need to write account address into the state.
         // account address is part of the key.
         writer.write_bytes(self.address.0.as_slice());
         self.balance.write(writer);
@@ -43,7 +43,7 @@ impl Codec for Account {
         let addr_bytes = <[u8; 33]>::read(reader)?;
         let address = Address::from_bytes(&addr_bytes[1..]).unwrap();
         let balance = <u64>::read(reader)?;
-        Ok(Self{address, balance})
+        Ok(Self { address, balance })
     }
 
     fn len_encoded(&self) -> usize {

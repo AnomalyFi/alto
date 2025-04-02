@@ -1,12 +1,12 @@
-use std::any::Any;
 use commonware_cryptography::sha256;
 use commonware_cryptography::sha256::Digest;
+use std::any::Any;
 
-use crate::units;
 use crate::address::Address;
-use crate::wallet::Wallet;
 use crate::signed_tx::SignedTx;
 use crate::state::State;
+use crate::units;
+use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
 use std::time::SystemTime;
 
@@ -32,9 +32,9 @@ pub struct UnitContext {
     // timestamp of the tx.
     pub timestamp: u64,
     // chain id of the tx.
-    pub chain_id: u64, 
+    pub chain_id: u64,
     // sender of the tx.
-    pub sender: Address, 
+    pub sender: Address,
 }
 
 pub trait UnitClone {
@@ -51,7 +51,7 @@ where
 }
 
 // unit need to be simple and easy to be packed in the tx and executed by the vm.
-pub trait Unit : UnitClone + Send + Sync + std::fmt::Debug  {
+pub trait Unit: UnitClone + Send + Sync + std::fmt::Debug {
     fn unit_type(&self) -> UnitType;
     fn encode(&self) -> Vec<u8>;
     fn decode(&mut self, bytes: &[u8]);
@@ -88,21 +88,26 @@ pub struct Tx {
     // units are fundamental unit of a tx. similar to actions.
     pub units: Vec<Box<dyn Unit>>,
 
-
     // id is the transaction id. It is the hash of digest.
     pub id: Digest,
     // digest is encoded tx.
     pub digest: Vec<u8>,
 }
 
-pub trait TxMethods:Sized {
+pub trait TxMethods: Sized {
     // new is used to create a new instance of Tx with given units and chain id.
     fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self;
     // set_fee is used to set the max fee and priority fee of the tx.
     fn set_fee(&mut self, max_fee: u64, priority_fee: u64);
     // sign is used to sign the tx with the given wallet.
     fn sign(&mut self, wallet: Wallet) -> SignedTx;
-    fn from(timestamp: u64, units: Vec<Box<dyn Unit>>, priority_fee: u64, max_fee: u64, chain_id: u64) -> Self;
+    fn from(
+        timestamp: u64,
+        units: Vec<Box<dyn Unit>>,
+        priority_fee: u64,
+        max_fee: u64,
+        chain_id: u64,
+    ) -> Self;
 
     // returns tx id.
     fn id(&mut self) -> Digest;
@@ -149,7 +154,13 @@ impl TxMethods for Tx {
         SignedTx::sign(self.clone(), wallet)
     }
 
-    fn from(timestamp: u64, units: Vec<Box<dyn Unit>>, priority_fee: u64, max_fee: u64, chain_id: u64) -> Self {
+    fn from(
+        timestamp: u64,
+        units: Vec<Box<dyn Unit>>,
+        priority_fee: u64,
+        max_fee: u64,
+        chain_id: u64,
+    ) -> Self {
         let mut tx = Self::default();
         tx.timestamp = timestamp;
         tx.units = units;
@@ -210,7 +221,7 @@ impl TxMethods for Tx {
         let mut tx = Self::default();
         tx.digest = bytes.to_vec(); // @todo ??
         tx.timestamp = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-        tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());  
+        tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
         tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
         tx.chain_id = u64::from_be_bytes(bytes[24..32].try_into().unwrap());
         let units = unpack_units(&bytes[32..]);
@@ -246,7 +257,11 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
         Ok(val)
     }
 
-    fn read_bytes<'a>(input: &'a [u8], offset: &'a mut usize, len: usize) -> Result<&'a [u8], String> {
+    fn read_bytes<'a>(
+        input: &'a [u8],
+        offset: &'a mut usize,
+        len: usize,
+    ) -> Result<&'a [u8], String> {
         if input.len() < *offset + len {
             return Err("Unexpected end of input when reading bytes".into());
         }
@@ -257,7 +272,7 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
 
     let unit_count = read_u64(digest, &mut offset)?;
 
-    let mut units:Vec<Box<dyn Unit>> = Vec::with_capacity(unit_count as usize);
+    let mut units: Vec<Box<dyn Unit>> = Vec::with_capacity(unit_count as usize);
 
     for _ in 0..unit_count {
         let unit_type = read_u8(digest, &mut offset)?;
@@ -268,7 +283,7 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
             return Err(format!("Invalid unit type: {}", unit_type.unwrap_err()));
         }
         let unit_type = unit_type?;
-        let unit:Box<dyn Unit> = match unit_type {
+        let unit: Box<dyn Unit> = match unit_type {
             UnitType::Transfer => {
                 let mut transfer = units::transfer::Transfer::default();
                 transfer.decode(&unit_bytes);
@@ -286,15 +301,14 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
     Ok(units)
 }
 
-
 // @todo implement tests for encoding and decoding of tx.
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-    use more_asserts::assert_gt;
+    use super::*;
     use crate::curr_timestamp;
     use crate::units::transfer::Transfer;
-    use super::*;
+    use more_asserts::assert_gt;
+    use std::error::Error;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
@@ -303,8 +317,8 @@ mod tests {
         let priority_fee = 75;
         let chain_id = 45205;
         let transfer = Transfer::new();
-        let units : Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
-        let mut digest: [u8; 32] = [0; 32];
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
@@ -319,7 +333,7 @@ mod tests {
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let mut decoded_msg = Tx::decode(&encoded_bytes)?;
+        let decoded_msg = Tx::decode(&encoded_bytes)?;
         let origin_transfer = origin_msg.units[0]
             .as_ref()
             .as_any()
