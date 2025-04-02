@@ -1,5 +1,8 @@
 use reqwest::Client;
-
+use crate::client_types::ClientRpcMessage;
+use bytes::Bytes;
+use serde::Deserialize;
+use alto_types::tx::Tx;
 pub const WEBSOCKET_PREFIX:  &'static str = "/ws";
 pub const RPC_PREFIX: &'static str = "/api";
 pub const PATH_SUBMIT_TX: &'static str = "/mempool/submit";
@@ -29,22 +32,17 @@ impl JSONRPCClient {
         }
     }
     //todo implement methods needed to communicate with server
-    pub fn submit_tx(&self, data: Vec<u8>) {
+    pub fn submit_tx(&self, tx: Tx) -> Vec<u8> {
+        //todo safety checks
         todo!()
     }
-    pub fn submit_batch_txs(&self, data: Vec<u8>) {
+
+    pub fn get_block(&self, data: Vec<u8>) -> u64{
         todo!()
     }
-    pub fn get_block(&self, data: Vec<u8>) {
-        todo!()
-    }
-    pub fn get_prev_block(&self, data: Vec<u8>) {
-        todo!()
-    }
+
     pub fn get_block_height(&self, data: Vec<u8>) {
         todo!()
     }
-    pub fn get_payload(&self, data: Vec<u8>) {
-        todo!()
-    }
+
 }

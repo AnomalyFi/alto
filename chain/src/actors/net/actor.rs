@@ -23,8 +23,8 @@ use tracing_subscriber::fmt::format;
 
 use crate::actors::mempool::mempool::{self, RawTransaction};
 
-use super::ingress::{Mailbox, Message, WebsocketClientMessage};
-
+use super::ingress::{Mailbox, Message};
+use alto_client::client_types::WebsocketClientMessage;
 #[derive(Deserialize)]
 pub struct DummyTransaction {
     #[serde(with = "serde_bytes")]
@@ -245,9 +245,9 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
 
         let success = mempool.submit_txs(vec![RawTransaction::new(payload)]).await[0];
         if success {
-            format!("submitted")
+            "submitted".to_string()
         } else {
-            format!("failed to submit tx")
+            "failed to submit tx".to_string()
         }
     }
 
