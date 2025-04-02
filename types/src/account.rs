@@ -3,7 +3,7 @@ use crate::address::Address;
 
 pub type Balance = u64;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub address: Address,
     pub balance: Balance,

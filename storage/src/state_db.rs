@@ -12,11 +12,11 @@ const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 // StateDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
 // It allows for easy retrieval and modification of account states, such as balances.
 pub struct StateDb<'a> {
-    db: &'a mut dyn TransactionalDb<'a>,
+    db: &'a mut dyn TransactionalDb,
 }
 
 impl<'a> StateDb<'a> {
-    pub fn new(db: &'a mut dyn TransactionalDb<'a>) -> Self {
+    pub fn new(db: &'a mut dyn TransactionalDb) -> Self {
         StateDb { db }
     }
 
@@ -81,21 +81,38 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn test_statedb_accounts() {
+    fn test_it_works() {
         // setup state db
-        let mut cache: HashMap<Key, Op> = HashMap::new();
-        let mut unfinalized: HashMap<Key, Op> = HashMap::new();
+        let cache: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
         let db = Arc::new(Mutex::new(HashmapDatabase::new()));
-    
-        let mut in_mem = InMemoryCachingTransactionalDb::new(&mut cache, &mut unfinalized, db);
+        let mut in_mem = InMemoryCachingTransactionalDb::new(Arc::clone(&cache),Arc::clone(&unfinalized), db);
+
         let address = Address::create_random_address();
-        {
-            let mut state_db = StateDb::new(&mut in_mem);
-            // use state_db
-            let _ = state_db.get_account(&address); // sample call
-        } // <- state_db dropped here
-    
-        // ✅ Continue using `in_mem` freely
-        // let _ = in_mem.commit();
+        let account = Account{address: address.clone(), balance: 1000};
+        let mut state_db = StateDb::new(&mut in_mem);
+        let _ = state_db.set_account(&account).unwrap(); 
+        let _ = in_mem.commit_last_tx();
+        let _ = in_mem.commit();
+        assert_eq!(unfinalized.lock().unwrap().len(), 1);
+        let mut state_db2 = StateDb::new(&mut in_mem);
+        let retrieved = state_db2.get_account(&address).unwrap().unwrap();
+        assert_eq!(retrieved, account);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_no_account_earlier() {
+        // setup state db
+        let cache: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<Key, Op>>>= Arc::new(Mutex::new(HashMap::new()));
+        let db = Arc::new(Mutex::new(HashmapDatabase::new()));
+        let mut in_mem = InMemoryCachingTransactionalDb::new(Arc::clone(&cache),Arc::clone(&unfinalized), db);
+
+        let address = Address::create_random_address();
+
+        let mut state_db = StateDb::new(&mut in_mem);
+
+        let _ = state_db.get_account(&address).unwrap();
     }
 }

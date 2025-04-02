@@ -287,8 +287,8 @@ mod tests {
     use std::sync::Mutex;
     #[test]
     fn test_it_works() {
-        let mut cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
-        let mut unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let db = Arc::new(Mutex::new(HashmapDatabase::new()));
         let key1 = [1; 33];
         let value1 = [1; 33];
