@@ -140,6 +140,9 @@ version = "0.1.0"
 dependencies = [
  "alto-storage",
  "alto-types",
+ "commonware-codec",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

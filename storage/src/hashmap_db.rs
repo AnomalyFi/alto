@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 
 pub struct HashmapDatabase {
-    data: HashMap<String, String>,
+    data: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl Default for HashmapDatabase {
@@ -22,23 +22,18 @@ impl HashmapDatabase {
 
 impl Database for HashmapDatabase {
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let key_value: String = String::from_utf8(key.into())?;
-        let str_value: String = String::from_utf8(value.into())?;
-
-        self.data.insert(key_value, str_value);
+        self.data.insert(key.into(), value.into());
         Ok(())
     }
 
     fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-        let str_key: String = String::from_utf8(key.into()).unwrap();
         self.data
-            .get(&str_key)
+            .get(key)
             .map_or(Ok(None), |v| Ok(Some(v.clone().into())))
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {
-        let key_value: String = String::from_utf8(key.into())?;
-        self.data.remove(&key_value);
+        self.data.remove(key);
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
-use crate::address::Address;
 use crate::account::{Account, Balance};
+use crate::address::Address;
 use std::error::Error;
 
 pub trait StateView {

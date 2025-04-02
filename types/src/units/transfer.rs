@@ -76,27 +76,25 @@ impl Unit for Transfer {
         context: &UnitContext,
         state: &mut Box<&mut dyn StateView>,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-
         if self.memo.len() > MAX_MEMO_SIZE {
             return Err(TransferError::InvalidMemoSize.into());
         }
 
         if let Some(bal) = state.get_balance(&context.sender) {
-
             if bal < self.value {
                 return Err(TransferError::InsufficientFunds.into());
             }
-
             let receiver_bal = state.get_balance(&self.to_address).unwrap_or(0);
 
-            if !state.set_balance(&context.sender, bal - self.value) || !state.set_balance(&self.to_address, receiver_bal + self.value){
+            if !state.set_balance(&context.sender, bal - self.value)
+                || !state.set_balance(&self.to_address, receiver_bal + self.value)
+            {
                 return Err(TransferError::StorageError.into());
             }
-            
         } else {
             return Err(TransferError::SenderAccountNotFound.into());
         }
-        
+
         Ok(None)
     }
 

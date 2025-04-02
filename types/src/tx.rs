@@ -124,7 +124,7 @@ pub trait TxMethods: Sized {
 
     fn set_actor(&mut self, actor: Address);
 
-    fn actor(&self) -> Address; 
+    fn actor(&self) -> Address;
 }
 
 impl Default for Tx {

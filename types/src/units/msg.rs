@@ -1,9 +1,11 @@
 use crate::{
-    address::Address, state_view::StateView, tx::{Unit, UnitContext, UnitType}
+    address::Address,
+    state_view::StateView,
+    tx::{Unit, UnitContext, UnitType},
 };
 use std::any::Any;
 
-// @todo couple SequencerMsg with DA. 
+// @todo couple SequencerMsg with DA.
 // and skip execution no-op.
 #[derive(Clone, Debug)]
 pub struct SequencerMsg {

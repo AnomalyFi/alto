@@ -1,22 +1,22 @@
 use crate::transactional_db::TransactionalDb;
 use alto_types::account::{Account, Balance};
 use alto_types::address::Address;
+use alto_types::state_view::StateView;
 use bytes::Bytes;
 use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
-use alto_types::state_view::StateView;
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
-// @todo rename StateDb to StateView.
-/// StateDb is a wrapper around TransactionalDb that provides StateViews for block execution.
-/// StateDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
+// @todo rename StateViewDb to StateView.
+/// StateViewDb is a wrapper around TransactionalDb that provides StateViews for block execution.
+/// StateViewDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
 /// It allows for easy retrieval and modification of account states, such as balances.
-pub struct StateDb<'a> {
+pub struct StateViewDb<'a> {
     db: &'a mut dyn TransactionalDb,
 }
 
-impl<'a> StateView for StateDb<'a> {
+impl<'a> StateView for StateViewDb<'a> {
     fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
         self.db.get(&key).and_then(|v| {
@@ -52,18 +52,25 @@ impl<'a> StateView for StateDb<'a> {
             Ok(Some(mut acc)) => {
                 acc.balance = amt;
                 self.set_account(&acc).is_ok()
-            }
-            _ => false,
+            },
+            Err(e) => {
+                let acc = Account {
+                    address: address.clone(),
+                    balance: amt,
+                };
+                self.set_account(&acc).is_ok()
+            },
+            _ => false, 
         }
     }
 }
 
-impl<'a>  StateDb <'a> {
+impl<'a> StateViewDb<'a> {
     pub fn new(db: &'a mut dyn TransactionalDb) -> Self {
-        StateDb { db }
+        StateViewDb { db }
     }
 
-    fn key_accounts(addr: &Address) -> [u8; 33] {
+    pub fn key_accounts(addr: &Address) -> [u8; 33] {
         Self::make_multi_key(ACCOUNTS_PREFIX, addr.as_slice())
     }
 
@@ -100,12 +107,12 @@ mod tests {
             address: address.clone(),
             balance: 1000,
         };
-        let mut state_db = StateDb::new(&mut in_mem);
+        let mut state_db = StateViewDb::new(&mut in_mem);
         state_db.set_account(&account).unwrap();
         let _ = in_mem.commit_last_tx();
         let _ = in_mem.commit();
         assert_eq!(unfinalized.lock().unwrap().len(), 1);
-        let mut state_db2 = StateDb::new(&mut in_mem);
+        let mut state_db2 = StateViewDb::new(&mut in_mem);
         let retrieved = state_db2.get_account(&address).unwrap().unwrap();
         assert_eq!(retrieved, account);
     }
@@ -122,7 +129,7 @@ mod tests {
 
         let address = Address::create_random_address();
 
-        let mut state_db = StateDb::new(&mut in_mem);
+        let mut state_db = StateViewDb::new(&mut in_mem);
 
         let _ = state_db.get_account(&address).unwrap();
     }
