@@ -18,6 +18,9 @@ use governor::clock::Clock as GClock;
 use governor::Quota;
 use rand::{CryptoRng, Rng};
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use alto_storage::{transactional_db::{Key, Op}, database::Database};
 use tracing::{error, warn};
 
 pub struct Config<I: Indexer> {
@@ -40,12 +43,14 @@ pub struct Config<I: Indexer> {
     pub fetch_rate_per_peer: Quota,
 
     pub indexer: Option<I>,
+
+    pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
 pub struct Engine<
     B: Blob,
     E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics,
-    I: Indexer,
+    I: Indexer, 
 > {
     context: E,
 
@@ -62,12 +67,22 @@ pub struct Engine<
         application::Mailbox,
         application::Supervisor,
     >,
+
+    // state
+    state_cache: Arc<Mutex<HashMap<Key, Op>>>,
+    unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    state_db: Arc<Mutex<dyn Database+Send+Sync>>,
 }
 
 impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metrics, I: Indexer>
     Engine<B, E, I>
 {
     pub async fn new(context: E, cfg: Config<I>) -> Self {
+        // @todo initalizing state cache and unfinalized state.
+        // if it is necessary pass state_cache, unfinalized_state and state_db to both application and syncer.
+        let state_cache:Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized_state:Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+
         // Create the application
         let public = public(&cfg.identity);
         let (application, supervisor, application_mailbox) = application::Actor::new(
@@ -129,7 +144,6 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 fetch_rate_per_peer: cfg.fetch_rate_per_peer,
             },
         );
-
         // Return the engine
         Self {
             context,
@@ -138,6 +152,9 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
             syncer,
             syncer_mailbox,
             consensus,
+            state_cache,
+            unfinalized_state,
+            state_db: cfg.state_db,
         }
     }
 

@@ -244,6 +244,7 @@ fn generate(sub_matches: &ArgMatches) {
             message_backlog,
             mailbox_size,
 
+            state_db_directory: "/home/ubuntu/alto/state".to_string(),
             indexer: None,
         };
         peer_configs.push((peer_config_file.clone(), peer_config));

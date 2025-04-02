@@ -41,6 +41,7 @@ name = "alto-chain"
 version = "0.0.4"
 dependencies = [
  "alto-client",
+ "alto-storage",
  "alto-types",
  "axum",
  "bytes",

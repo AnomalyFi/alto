@@ -1,6 +1,7 @@
 use alto_chain::{engine, Config};
 use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
+use alto_storage::rocks_db::RocksDbDatabase;
 use axum::{routing::get, serve, Extension, Router};
 use clap::{Arg, Command};
 use commonware_cryptography::{
@@ -29,6 +30,7 @@ use std::{
 };
 use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
+use std::sync::{Arc, Mutex};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
 const METRICS_PORT: u16 = 9090;
@@ -185,6 +187,11 @@ fn main() {
             indexer = Some(Client::new(&uri, identity_public.into()));
         }
 
+        // create state db: rocks db for now.
+        let state_db = RocksDbDatabase::new_with_path(&config.state_db_directory)
+            .expect("Could not create state db");
+        let wrapped_state_db = Arc::new(Mutex::new(state_db));
+        
         // Create engine
         let config = engine::Config {
             partition_prefix: "engine".to_string(),
@@ -204,6 +211,7 @@ fn main() {
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
             indexer,
+            state_db: wrapped_state_db,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 

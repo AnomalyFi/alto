@@ -10,7 +10,6 @@ pub type Key = [u8; 33];
 // ii. should be able to rollback if a tx reverts.
 // iii. should be able to rollback if a block forks.
 // iv. should be able to commit to all the state changes once a block has been accepted.
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OpAction {
     // key is read
