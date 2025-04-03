@@ -24,7 +24,7 @@ mod tests {
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
     use futures::channel::mpsc;
 
-    use super::{ingress, mempool::{self, Mempool, RawTransaction}};
+    use super::{ingress, mempool::{self, Mempool}};
 
     type Registrations<P> = HashMap<P, (
         (Sender<P>, Receiver<P>), 

@@ -1,8 +1,10 @@
 //! Common types used throughout `alto`.
 
 mod block;
+mod batch;
 
 pub use block::{Block, Finalized, Notarized};
+pub use batch::Batch;
 use commonware_cryptography::{Ed25519, Scheme};
 use commonware_utils::SystemTimeExt;
 use std::time::SystemTime;
