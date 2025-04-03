@@ -1,7 +1,7 @@
 use crate::address::Address;
+use crate::pub_key_to_address;
 use commonware_codec::{Codec, Error, Reader, Writer};
 use commonware_cryptography::ed25519::PublicKey;
-use crate::pub_key_to_address;
 
 pub type Balance = u64;
 

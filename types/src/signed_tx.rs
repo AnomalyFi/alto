@@ -16,7 +16,6 @@ pub struct SignedTx {
 // function names are self explanatory.
 pub trait SignedTxChars: Sized {
     fn new(tx: Tx, pub_key: PublicKey, signature: Vec<u8>) -> Self;
-    // fn sign(&mut self, wallet: Wallet) -> SignedTx;
     fn verify(&mut self) -> bool;
     fn signature(&self) -> Vec<u8>;
     fn public_key(&self) -> Vec<u8>;
@@ -73,8 +72,6 @@ impl SignedTxChars for SignedTx {
 
     // @todo add syntactic checks and use methods consume.
     fn decode(bytes: &[u8]) -> Result<Self, String> {
-        // @todo this method seems untidy.
-
         let raw_tx_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         let raw_tx = &bytes[8..8 + raw_tx_len as usize];
         let pub_key = &bytes[8 + raw_tx_len as usize..8 + raw_tx_len as usize + 32];
@@ -143,17 +140,17 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
 
     use super::*;
+    use crate::curr_timestamp;
     use crate::tx::Unit;
     use crate::units::transfer::Transfer;
-    use crate::{create_test_keypair, curr_timestamp};
+    use crate::wallet::Wallet;
     use commonware_cryptography::sha256::Digest;
     use more_asserts::assert_gt;
 
     #[test]
-    fn test_encode_decode() -> Result<(), Box<dyn Error>> {
+    fn test_encode_decode() {
         let timestamp = curr_timestamp();
         let max_fee = 100;
         let priority_fee = 75;
@@ -162,9 +159,7 @@ mod tests {
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
         let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
-        let (pk, _sk) = create_test_keypair();
-        // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
-        // shouldn't encode be able to encode without changing the msg?
+
         let tx = Tx {
             timestamp,
             max_fee,
@@ -172,22 +167,18 @@ mod tests {
             chain_id,
             units: units.clone(),
             id,
-            digest: digest.to_vec(),
+            digest: vec![],
             actor: Address::empty(),
         };
-        let mut origin_msg = SignedTx {
-            tx,
-            pub_key: pk,
-            address: Address::create_random_address(),
-            signature: vec![],
-        };
-        let encoded_bytes = origin_msg.encode();
+        let mut rng = rand::rngs::OsRng;
+        let wallet = Wallet::generate(&mut rng);
+        let mut signed_tx = SignedTx::sign(tx, wallet);
+        let encoded_bytes = signed_tx.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let decoded_msg = SignedTx::decode(&encoded_bytes)?;
-        assert_eq!(origin_msg.pub_key, decoded_msg.pub_key);
-        assert_eq!(origin_msg.address, decoded_msg.address);
-        assert_eq!(origin_msg.signature, decoded_msg.signature);
+        let decoded_msg = SignedTx::decode(&encoded_bytes).unwrap();
+        assert_eq!(signed_tx.pub_key, decoded_msg.pub_key);
+        assert_eq!(signed_tx.address, decoded_msg.address);
+        assert_eq!(signed_tx.signature, decoded_msg.signature);
         // @todo make helper to compare fields in tx and units. same issue when testing in tx.rs file.
-        Ok(())
     }
 }

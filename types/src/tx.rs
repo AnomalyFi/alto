@@ -201,7 +201,7 @@ impl TxMethods for Tx {
     }
 
     fn encode(&mut self) -> Vec<u8> {
-        if self.digest.is_empty() {
+        if !self.digest.is_empty() {
             return self.digest.clone();
         }
         // pack tx timestamp.
@@ -222,7 +222,7 @@ impl TxMethods for Tx {
             // pack len of inidividual unit.
             self.digest.extend((unit_bytes.len() as u64).to_be_bytes());
             // pack individual unit.
-            self.digest.extend_from_slice(&unit_bytes);
+            self.digest.extend(&unit_bytes);
         });
 
         // generate tx id.
@@ -237,7 +237,6 @@ impl TxMethods for Tx {
             return Err("Empty bytes".to_string());
         }
         let mut tx = Self::default();
-        tx.digest = bytes.to_vec(); // @todo ??
         tx.timestamp = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
         tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
@@ -248,7 +247,8 @@ impl TxMethods for Tx {
         }
         tx.units = units?;
         // generate tx id.
-        tx.id = sha256::hash(&tx.digest);
+        tx.id = sha256::hash(bytes);
+        tx.digest = bytes.to_vec();
         // return transaction.
         Ok(tx)
     }
@@ -334,6 +334,7 @@ mod tests {
     use crate::units::transfer::Transfer;
     use more_asserts::assert_gt;
     use std::error::Error;
+    use std::vec;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
@@ -355,7 +356,7 @@ mod tests {
             units: units.clone(),
             id,
             actor: Address::empty(),
-            digest: digest.to_vec(),
+            digest: vec![],
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);

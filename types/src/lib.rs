@@ -5,8 +5,8 @@ mod block;
 pub use block::{Block, Finalized, Notarized};
 use commonware_cryptography::{Ed25519, Scheme};
 use commonware_utils::SystemTimeExt;
-use std::time::SystemTime;
 use sha3::{Digest, Keccak256};
+use std::time::SystemTime;
 
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
@@ -20,8 +20,8 @@ pub mod units;
 pub mod wallet;
 pub mod wasm;
 
-use rand::rngs::OsRng;
 use crate::address::Address;
+use rand::rngs::OsRng;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
@@ -55,14 +55,13 @@ pub fn curr_timestamp() -> u64 {
 
 // returns an address from pubkey provided
 fn pub_key_to_address(pk: &PublicKey) -> Address {
-    let pk_hash = Keccak256::digest(pk.as_bytes());
+    let pk_hash = Keccak256::digest(pk.as_ref());
 
     // Return the full 32-byte Keccak256 hash as the address
     let mut address = [0u8; 32];
     address.copy_from_slice(&pk_hash);
     Address(address)
 }
-
 
 #[cfg(test)]
 mod tests {
