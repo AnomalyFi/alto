@@ -105,34 +105,44 @@ pub struct Tx<H: Hasher> {
 
 impl<H: Hasher> Debug for Tx<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!() 
+        // todo! do any of these need to be hex encoded?
+        f.debug_struct("SignedTx")
+            .field("timestamp", &self.timestamp)
+            .field("max_fee", &self.max_fee)
+            .field("priority_fee", &self.priority_fee)
+            .field("chain_id", &self.chain_id)
+            .field("units", &self.units)
+            .field("id", &self.id)
+            .field("digest", &self.digest)
+            .field("actor", &self.actor)
+            .finish()
     }
 }
 
 impl<H: Hasher> Tx<H> {
-    pub fn digest(&self) -> H::Digest {
-        todo!()
+    pub fn digest(&mut self) -> H::Digest {
+        self.encode()
     }
 
     pub fn validate(&self) -> bool {
         todo!()
     } 
 
-    pub fn payload(&self) -> Vec<u8> {
-        todo!()
+    pub fn payload(&mut self) -> Vec<u8> {
+        self.encode()
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        todo!()
+    pub fn serialize(&mut self) -> Vec<u8> {
+        self.encode()
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
-        todo!()
+        Self::decode(raw)
     }
 
     // size of the payload
-    pub fn size(&self) -> usize {
-        todo!()
+    pub fn size(&mut self) -> usize {
+        self.payload().len()
     }
 
     pub fn random() -> Self {
@@ -158,9 +168,7 @@ impl<H: Hasher> Tx<H> {
         SignedTx::sign(self.clone(), wallet)
     }
 
-    //TODO: rename possibly as this method signature is more like a `new` for me instead of a from method
-    // the from method usually is taken by the From trait
-    fn from(
+    fn new_from_params(
         timestamp: u64,
         units: Vec<Box<dyn Unit>>,
         priority_fee: u64,
@@ -323,7 +331,6 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
     Ok(units)
 }
 
-// @todo implement tests for encoding and decoding of tx.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,7 @@ use crate::{
     tx::{Unit, UnitContext, UnitType},
 };
 use std::any::Any;
+use std::error::Error;
 
 // @todo couple SequencerMsg with DA.
 // and skip execution no-op.
@@ -46,11 +47,19 @@ impl Unit for SequencerMsg {
     }
 
     // @todo introduce syntactic checks.
-    fn decode(&mut self, bytes: &[u8]) {
-        self.chain_id = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-        self.from_address = Address::from_bytes(&bytes[8..40]).unwrap();
-        let data_len = u64::from_be_bytes(bytes[40..48].try_into().unwrap());
+    fn decode(&mut self, bytes: &[u8]) -> Result<(), Box<dyn Error>>{
+        let expected_size = size_of::<u64>() * 2 + size_of::<Address>();
+        if expected_size < bytes.len() {
+            return Err("Not enough data to decode sequencer message".into());
+        }
+        self.chain_id = u64::from_be_bytes(bytes[0..8].try_into()?);
+        self.from_address = Address::from_bytes(&bytes[8..40])?;
+        let data_len:usize = u64::from_be_bytes(bytes[40..48].try_into()?) as usize;
+        if (expected_size + data_len) != bytes.len() {
+            return Err("Incorrect sequencer message length".into());
+        }
         self.data = bytes[48..(48 + data_len as usize)].to_vec();
+        Ok(())
     }
 
     fn apply(

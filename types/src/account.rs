@@ -35,7 +35,8 @@ impl Codec for Account {
     fn write(&self, writer: &mut impl Writer) {
         // @rikoeldon I think we don't need to write account address into the state.
         // account address is part of the key.
-        writer.write_bytes(self.address.0.as_slice());
+        // todo: might not need to write address in since address is already part of the key?
+        // writer.write_bytes(self.address.0.as_slice());
         self.balance.write(writer);
     }
 

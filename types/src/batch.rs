@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::time::{Duration, SystemTime};
 
 use bytes::BufMut;
@@ -60,7 +61,7 @@ impl<H: Hasher> Batch<H> {
         for _ in 0..tx_count {
             // For each transaction, first read the size (u64).
             if bytes.remaining() < 8 {
-                return Err(format!("not enough bytes for tx size"));
+                return Err("not enough bytes for tx size".to_string());
             }
             let tx_size = bytes.get_u64() as usize;
             // Ensure there are enough bytes left.
@@ -83,12 +84,10 @@ impl<H: Hasher> Batch<H> {
     }
 
     pub fn contain_tx(&self, digest: &H::Digest) -> bool {
-        todo!()
-        // self.txs.iter().any(|tx| &tx.digest == digest) 
+        self.txs.iter().any(|tx| &tx.digest == digest)
     }
 
     pub fn tx(&self, digest: &H::Digest) -> Option<SignedTx<H>> {
-        // self.txs.iter().find(|tx| &tx.digest == digest).cloned()
-        todo!()
+        self.txs.iter().find(|tx| &tx.hash() == digest).map_or(None, |tx| Some(tx.clone()))
     }
 }

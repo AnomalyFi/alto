@@ -62,13 +62,21 @@ impl Unit for Transfer {
     }
 
     // @todo introduce syntactic checks.
-    fn decode(&mut self, bytes: &[u8]) {
-        self.to_address = Address::from_bytes(&bytes[0..32]).unwrap();
-        self.value = u64::from_be_bytes(bytes[32..40].try_into().unwrap());
-        let memo_len = u64::from_be_bytes(bytes[40..48].try_into().unwrap());
+    fn decode(&mut self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+        let expected_size = size_of::<u64>() * 2 + size_of::<Address>();
+        if expected_size < bytes.len() {
+            return Err("Not enough data to decode sequencer message".into());
+        }
+        self.to_address = Address::from_bytes(&bytes[0..32])?;
+        self.value = u64::from_be_bytes(bytes[32..40].try_into()?);
+        let memo_len :usize = u64::from_be_bytes(bytes[40..48].try_into()?) as usize;
+        if (expected_size + memo_len) != bytes.len() {
+            return Err("Incorrect sequencer message length".into());
+        }
         if memo_len > 0 {
             self.memo = bytes[48..(48 + memo_len as usize)].to_vec();
         }
+        Ok(())
     }
 
     fn apply(

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 use std::hash::Hash;
-
+use commonware_codec::Codec;
 use crate::address::Address;
 use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
@@ -14,52 +14,60 @@ pub struct SignedTx<H: Hasher> {
     pub digest: H::Digest,
 
     pub_key: PublicKey,
-    address: Address,
     signature: Vec<u8>,
+    // cached is encode of SignedTx
+    cached_payload: Vec<u8>,
 }
 
 impl<H: Hasher> Debug for SignedTx<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        // todo! do any of these need to be hex encoded?
+        f.debug_struct("SignedTx")
+        .field("tx", &self.tx)
+        .field("digest", &self.digest)
+        // .field("address", &self.address)
+        .field("signature", &self.signature)
+        .finish()
     } 
 }
 
 
 impl<H: Hasher> SignedTx<H> {
-    pub fn payload(&self) -> Vec<u8> {
-        todo!()
-    } 
-    pub fn size(&self) -> usize {
-        todo!()
+    pub fn payload(&mut self) -> Vec<u8> {
+        if self.cached_payload.is_empty() {
+            self.cached_payload = self.encode();
+        }
+        self.cached_payload.clone()
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        todo!()
+    pub fn size(&mut self) -> usize {
+        self.payload().len()
+    }
+
+    pub fn serialize(&mut self) -> Vec<u8> {
+        self.payload()
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
-        todo!()
+        Self::decode(raw)
     }
 
     pub fn validate(&self) -> bool {
-        todo!()
+
     }
 
     pub fn random() -> Self {
         todo!()
     }
 
-
-
-    // @todo either have all fields initialized or none.
     fn new(tx: Tx<H>, pub_key: PublicKey, signature: Vec<u8>) -> Self {
         let mut hasher = H::new();
         let digest = hasher.finalize();
         Self {
             tx,
             pub_key: pub_key.clone(),
-            address: Address::from_pub_key(&pub_key),
             signature: signature.clone(),
+            cached_payload: Vec::new(),
             digest
         }
     }
@@ -80,10 +88,6 @@ impl<H: Hasher> SignedTx<H> {
 
     fn public_key(&self) -> Vec<u8> {
         self.pub_key.to_vec()
-    }
-
-    fn address(&self) -> Address {
-        self.address.clone()
     }
 
     // @todo add syntactic checks.
@@ -122,11 +126,11 @@ impl<H: Hasher> SignedTx<H> {
         let digest = hasher.finalize();
 
         Ok(SignedTx {
-            tx: tx.unwrap(),
+            tx: tx?,
             pub_key: public_key.clone(),
-            address: Address::from_pub_key(&public_key),
             signature: signature.to_vec(),
-            digest
+            digest,
+            cached_payload: Vec::new(),
         })
     }
 
@@ -140,9 +144,9 @@ impl<H: Hasher> SignedTx<H> {
         SignedTx {
             tx: tx.clone(),
             signature: wallet.sign(&tx_data),
-            address: wallet.address(),
             pub_key: wallet.public_key(),
-            digest
+            digest,
+            cached_payload: Vec::new(),
         }
     }
 }
@@ -219,15 +223,14 @@ mod tests {
         let mut origin_msg = SignedTx {
             tx,
             pub_key: pk,
-            address: Address::create_random_address(),
             signature: vec![],
-            digest
+            digest,
+            cached_payload: vec![],
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
         let decoded_msg = SignedTx::<Sha256>::decode(&encoded_bytes)?;
         assert_eq!(origin_msg.pub_key, decoded_msg.pub_key);
-        assert_eq!(origin_msg.address, decoded_msg.address);
         assert_eq!(origin_msg.signature, decoded_msg.signature);
         // @todo make helper to compare fields in tx and units. same issue when testing in tx.rs file.
         Ok(())
