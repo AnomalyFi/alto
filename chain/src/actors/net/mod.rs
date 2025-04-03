@@ -109,7 +109,7 @@ mod tests {
                                     return;
                                 }
                             }
-                        } ,
+                        },
                         _ => {
                             debug!("unknown message")
                         }

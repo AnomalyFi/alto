@@ -1,7 +1,9 @@
+use std::hash::Hash;
+
 use crate::signed_tx::{pack_signed_txs, unpack_signed_txs, SignedTx};
-use crate::{Finalization, Notarization};
+use crate::{batch, Batch, Finalization, Notarization};
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{bls12381::PublicKey, sha256, sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{bls12381::PublicKey, sha256, sha256::Digest as Sha256Digest, Hasher, Sha256};
 use commonware_utils::{Array, SizedSerialize};
 
 // @todo add state root, fee manager and results to the block struct.
@@ -9,7 +11,7 @@ use commonware_utils::{Array, SizedSerialize};
 #[derive(Clone, Debug)]
 pub struct Block {
     /// The parent block's digest.
-    pub parent: Digest,
+    pub parent: Sha256Digest,
 
     /// The height of the block in the blockchain.
     pub height: u64,
@@ -17,52 +19,55 @@ pub struct Block {
     /// The timestamp of the block (in milliseconds since the Unix epoch).
     pub timestamp: u64,
 
-    /// The raw transactions in the block.
-    pub raw_txs: Vec<u8>,
-
     /// The state root of the block.
-    pub state_root: Digest,
+    pub state_root: Sha256Digest,
 
-    txs: Vec<SignedTx<Sha256>>,
+    pub batches: Vec<Sha256Digest>,
+
+    _batches: Vec<Batch<Sha256>>,
+
     /// Pre-computed digest of the block.
-    digest: Digest,
+    digest: Sha256Digest,
 }
 
 impl Block {
     fn compute_digest(
-        parent: &Digest,
+        parent: &Sha256Digest,
         height: u64,
         timestamp: u64,
-        raw_txs: Vec<u8>,
-        state_root: &Digest,
-    ) -> Digest {
+        batch_digests: &Vec<Sha256Digest>,
+        state_root: &Sha256Digest,
+    ) -> Sha256Digest {
         let mut hasher = Sha256::new();
         hasher.update(parent);
         hasher.update(&height.to_be_bytes());
         hasher.update(&timestamp.to_be_bytes());
-        hasher.update(&raw_txs);
+        for digest in batch_digests.iter() {
+            hasher.update(digest);
+        }
         hasher.update(state_root);
         hasher.finalize()
     }
 
     pub fn new(
-        parent: Digest,
+        parent: Sha256Digest,
         height: u64,
         timestamp: u64,
-        txs: Vec<SignedTx<Sha256>>,
-        state_root: Digest,
+        batches: Vec<Batch<Sha256>>,
+        state_root: Sha256Digest,
     ) -> Self {
         // let mut txs = txs;
         // @todo this is packing txs in a block.
-        let raw_txs = pack_signed_txs(txs.clone());
-        let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
+        let batch_digests = batches.iter().map(|batch| batch.digest).collect();
+
+        let digest = Self::compute_digest(&parent, height, timestamp, &batch_digests, &state_root);
         Self {
             parent,
             height,
             timestamp,
-            raw_txs,
             state_root,
-            txs,
+            batches: batch_digests,
+            _batches: batches,
             digest,
         }
     }
@@ -73,7 +78,10 @@ impl Block {
         bytes.put_u64(self.height);
         bytes.put_u64(self.timestamp);
         bytes.extend_from_slice(&self.state_root);
-        bytes.extend_from_slice(self.raw_txs.as_slice());
+        bytes.put_u64(self.batches.len() as u64);
+        for digest in self.batches.iter() {
+            bytes.extend_from_slice(&digest);
+        }
         bytes
     }
 
@@ -82,51 +90,41 @@ impl Block {
         // if bytes.len() != Self::SERIALIZED_LEN {
         //     return None;
         // }
-        let parent = Digest::read_from(&mut bytes).ok()?;
+        let parent = Sha256Digest::read_from(&mut bytes).ok()?;
         let height = bytes.get_u64();
         let timestamp = bytes.get_u64();
-        let state_root = Digest::read_from(&mut bytes).ok()?;
-        let raw_txs = bytes.to_vec();
-        let digest = Self::compute_digest(&parent, height, timestamp, raw_txs.clone(), &state_root);
-        let txs = unpack_signed_txs(raw_txs.clone());
+        let state_root = Sha256Digest::read_from(&mut bytes).ok()?;
+        let num_batches = bytes.get_u64();
+        let mut batch_digests = Vec::with_capacity(num_batches as usize);
+        for _ in 0..num_batches {
+            let batch_digest = Sha256Digest::read_from(&mut bytes).ok()?;
+            batch_digests.push(batch_digest);
+        }
+
+        let digest = Self::compute_digest(&parent, height, timestamp, &batch_digests, &state_root);
 
         // Return block
         Some(Self {
             parent,
             height,
             timestamp,
-            raw_txs,
             state_root,
-            txs,
+            batches: batch_digests,
+            _batches: vec![],
             digest,
         })
     }
 
-    pub fn digest(&self) -> Digest {
+    pub fn digest(&self) -> Sha256Digest {
         self.digest.clone()
-    }
-    //todo check logic below
-    pub fn encode(&mut self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-        bytes.extend_from_slice(&self.parent);
-        bytes.extend_from_slice(&(self.height.to_be_bytes()));
-        bytes.extend_from_slice(&(self.timestamp.to_be_bytes()));
-        bytes.extend_from_slice(self.raw_txs.as_slice());
-        bytes.extend_from_slice(&self.state_root);
-        // encoding signed txs
-        for tx in self.txs.iter_mut() {
-            bytes.extend_from_slice(&tx.encode());
-        }
-
-        // return encoded digest.
-        self.digest = sha256::hash(&bytes);
-        bytes
     }
 }
 
+// TODO: this should be an estimate of the size of one block since batches size can be variable
 impl SizedSerialize for Block {
+    // there is an assumed factor `5` multiply by Sha256Digest::SERIALIZED_LEN, which is an estimate how average many batches will be included in one block
     const SERIALIZED_LEN: usize =
-        Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN;
+        Sha256Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN + Sha256Digest::SERIALIZED_LEN + 5 * Sha256Digest::SERIALIZED_LEN;
 }
 
 pub struct Notarized {
