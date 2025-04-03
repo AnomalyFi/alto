@@ -11,8 +11,7 @@ use alto_storage::{
     transactional_db::{Key, Op, OpAction},
 };
 use alto_types::{
-    account::Account, address::Address, signed_tx::unpack_signed_txs, Block, Finalization,
-    Notarization, Seed,
+    account::Account, address::Address, signed_tx::unpack_signed_txs, units::transfer::Transfer, Block, Finalization, Notarization, Seed
 };
 use alto_vm::vm::VM;
 // @todo below imports are for dummy tx.
@@ -128,6 +127,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         // there are no blocks built, while genesis.
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
+        let dummy_wallet = Wallet::generate();
         // @todo initiate fee manager here.
         // @todo commit to database.
         while let Some(message) = self.mailbox.next().await {
@@ -160,6 +160,14 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                             // store the account in the state database.
                             let _ = s_db.put(&key, write_buf.as_ref());
                         });
+                    let key = StateViewDb::key_accounts(&dummy_wallet.address());
+                    let acc = Account {
+                        address: dummy_wallet.address(),
+                        balance: 10000000,
+                    };
+                    let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
+                    acc.write(&mut write_buf);
+                    s_db.put(&key, write_buf.as_ref()).unwrap();
                     let _ = response.send(genesis_digest.clone());
                 }
                 // its this validators turn to propose the block.
@@ -184,6 +192,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                         let unfinalized_state = Arc::clone(&self.unfinalized_state);
                         let state_db = Arc::clone(&self.state_db);
                         let mut syncer_clone = syncer.clone();
+                        let d_wal = dummy_wallet.clone();
                         move |context| async move {
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
@@ -202,9 +211,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     let mut txs = Vec::new(); // @todo get txs from mempool.
                                     let mut dummy_unit = SequencerMsg::new();
                                     dummy_unit.data = vec![0,1,2,3];
-                                    let mut dummy_tx = Tx::new(vec![Box::new(dummy_unit)], self.chain_id);
-                                    let dummy_wallet = Wallet::generate();
-                                    let dummy_signed_tx = dummy_tx.sign(dummy_wallet);
+                                    let mut dummy_unit2 = Transfer::new();
+                                    dummy_unit2.to_address = Address::create_random_address();
+                                    dummy_unit2.value = 1;
+                                    let mut dummy_tx = Tx::new(vec![Box::new(dummy_unit), Box::new(dummy_unit2)], self.chain_id);
+                                    let dummy_signed_tx = dummy_tx.sign(d_wal);
                                     txs.push(dummy_signed_tx);
                                     // all the touched keys by the block will be added to unfinalized state.
                                     let mut executor_vm = VM::new(

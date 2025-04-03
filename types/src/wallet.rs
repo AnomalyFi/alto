@@ -24,6 +24,7 @@ pub trait Auth {
 }
 
 /// Wallet is the module used by the user to sign transactions. Wallet uses Ed25519 signature scheme.
+#[derive(Clone)]
 pub struct Wallet {
     // Private key
     priv_key: PrivateKey,
