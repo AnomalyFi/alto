@@ -5,10 +5,10 @@ use alto_types::state_view::StateView;
 use bytes::Bytes;
 use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
+use tracing::{info, warn};
 const ACCOUNTS_PREFIX: u8 = 0x0;
 const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
-// @todo rename StateViewDb to StateView.
 /// StateViewDb is a wrapper around TransactionalDb that provides StateViews for block execution.
 /// StateViewDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.
 /// It allows for easy retrieval and modification of account states, such as balances.
@@ -16,7 +16,7 @@ pub struct StateViewDb<'a> {
     db: &'a mut dyn TransactionalDb,
 }
 
-impl<'a> StateView for StateViewDb<'a> {
+impl StateView for StateViewDb<'_> {
     fn get_account(&mut self, address: &Address) -> Result<Option<Account>, Box<dyn Error>> {
         let key = Self::key_accounts(address);
         self.db.get(&key).and_then(|v| {
@@ -51,12 +51,14 @@ impl<'a> StateView for StateViewDb<'a> {
     }
 
     fn set_balance(&mut self, address: &Address, amt: Balance) -> bool {
+        info!("Setting balance for address: {}", address);
         match self.get_account(address) {
             Ok(Some(mut acc)) => {
                 acc.balance = amt;
                 self.set_account(&acc).is_ok()
             }
             Err(e) => {
+                warn!("Error getting account: {}", e);
                 let acc = Account {
                     address: address.clone(),
                     balance: amt,

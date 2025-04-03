@@ -44,6 +44,6 @@ pub struct Config<I: Indexer> {
 
     // State
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-    pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    pub unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }

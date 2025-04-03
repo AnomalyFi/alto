@@ -38,8 +38,9 @@ pub struct Config {
     /// before blocking.
     pub mailbox_size: usize,
 
+    pub chain_id: u64,
     /// State
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-    pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    pub unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }

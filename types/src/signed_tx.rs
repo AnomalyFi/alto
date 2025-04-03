@@ -143,7 +143,6 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
 
 #[cfg(test)]
 mod tests {
-    use std::default;
     use std::error::Error;
 
     use super::*;
@@ -163,7 +162,7 @@ mod tests {
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
         let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
-        let (pk, sk) = create_test_keypair();
+        let (pk, _sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
         let tx = Tx {

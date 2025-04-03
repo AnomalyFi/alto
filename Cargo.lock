@@ -43,6 +43,7 @@ dependencies = [
  "alto-client",
  "alto-storage",
  "alto-types",
+ "alto-vm",
  "axum",
  "bytes",
  "clap",
@@ -115,6 +116,7 @@ dependencies = [
  "rand",
  "rocksdb",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]

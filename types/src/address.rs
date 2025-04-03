@@ -1,4 +1,7 @@
+use std::fmt::{Display, Formatter};
+
 use crate::{PublicKey, ADDRESSLEN};
+use commonware_utils::hex;
 use more_asserts::assert_le;
 use rand::Rng;
 
@@ -49,5 +52,11 @@ impl Address {
 
     pub fn as_bytes(&self) -> &[u8; ADDRESSLEN] {
         &self.0
+    }
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex(&self.0))
     }
 }

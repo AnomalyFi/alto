@@ -27,9 +27,7 @@ impl Database for HashmapDatabase {
     }
 
     fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-        self.data
-            .get(key)
-            .map_or(Ok(None), |v| Ok(Some(v.clone().into())))
+        self.data.get(key).map_or(Ok(None), |v| Ok(Some(v.clone())))
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<(), Box<dyn Error>> {

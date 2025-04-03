@@ -40,7 +40,7 @@ where
     let subscriber = Registry::default().with(layer);
 
     let dispatch = tracing::Dispatch::new(subscriber);
-    let result = with_default(&dispatch, || func());
+    let result = with_default(&dispatch, func);
 
     let logs = buffer.lock().unwrap();
     let log_str = String::from_utf8(logs.clone()).unwrap_or_default();

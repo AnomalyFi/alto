@@ -87,7 +87,6 @@ mod tests {
         let chain_id = 4502;
         let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let from_address = Address::create_random_address();
-        let relayer_id = 1;
         let origin_msg = SequencerMsg {
             chain_id,
             data,

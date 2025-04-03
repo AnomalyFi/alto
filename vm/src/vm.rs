@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::vec;
 
+use crate::capture_logs::capture_logs;
 use alto_storage::state_db::StateViewDb;
 use alto_storage::transactional_db::TransactionalDb;
 use alto_storage::{
@@ -11,14 +12,17 @@ use alto_storage::{
 };
 use alto_types::null_error::NullError;
 use alto_types::state_view::StateView;
-use alto_types::tx::{Tx, TxMethods, Unit, UnitContext};
+use alto_types::{
+    signed_tx::SignedTx,
+    tx::{Tx, TxMethods, UnitContext, TxResult},
+};
 
 pub struct VM {
     pub block_number: u64,
     pub timestamp: u64,
     pub chain_id: u64,
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-    pub unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    pub unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
@@ -28,7 +32,7 @@ impl VM {
         timestamp: u64,
         chain_id: u64,
         state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-        unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+        unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
         state_db: Arc<Mutex<dyn Database + Send + Sync>>,
     ) -> Self {
         Self {
@@ -42,47 +46,44 @@ impl VM {
     }
 
     // applies new set of txs on the given state.
-    pub fn apply(&mut self, txs: Vec<Tx>) -> (Vec<Vec<Vec<u8>>>, Vec<Box<dyn Error>>) {
+    // apply assumes apply is equivalent to executing all the txs in a block.
+    // and moves all the touched state by the txs into unfinalized state.
+    pub fn apply(&mut self, stxs: Vec<SignedTx>) -> Vec<TxResult>{
+        let unfinalized_state_for_in_mem =
+            merge_maps(self.unfinalized_state.lock().unwrap().clone());
         let mut in_mem_db = InMemoryCachingTransactionalDb::new(
             Arc::clone(&self.state_cache),
-            Arc::clone(&self.unfinalized_state),
+            Arc::new(Mutex::new(unfinalized_state_for_in_mem)),
             Arc::clone(&self.state_db),
         );
-        let mut outputs: Vec<Vec<Vec<u8>>> = Vec::new();
-        let mut errors: Vec<Box<dyn Error>> = Vec::new();
-        for tx in txs {
+        let mut results = Vec::new();
+        for stx in stxs {
             let mut state_view = StateViewDb::new(&mut in_mem_db);
-            let result = self.apply_tx(tx.clone(), &mut state_view);
-            match result {
-                Ok(output) => {
-                    // tx executed successfully.
-                    // commit the state changes made by the tx.
-                    let _ = in_mem_db.commit_last_tx();
-                    // push the output of the tx to the outputs.
-                    outputs.push(output);
-                    // push null error
-                    errors.push(Box::new(NullError));
-                }
-                Err(e) => {
-                    // tx execution failed.
-                    // rollback the transaction.
-                    let _ = in_mem_db.rollback_last_tx();
-                    // push empty vec to the outputs.
-                    outputs.push(vec![]);
-                    // push the error to the errors.
-                    errors.push(e);
-                }
+            let tx = stx.tx;
+            let result = self.apply_tx(tx, &mut state_view);
+            if result.status {
+                let _ = in_mem_db.commit_last_tx();
+            }else{
+                let _ = in_mem_db.rollback_last_tx();
             }
+            results.push(result);
         }
-        (outputs, errors)
+        self.unfinalized_state
+            .lock()
+            .unwrap()
+            .insert(self.block_number, in_mem_db.touched);
+        // let _ = in_mem_db.commit();
+        // @todo we did not call commit, but moved all the touched state into unfinalized state.
+        results
     }
 
     // applies a single tx on the given state.
-    fn apply_tx<T: StateView>(
+    fn apply_tx<'a, T: StateView>(
         &mut self,
         tx: Tx,
         state_view: &mut T,
-    ) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
+        // exec_logs: &'a mut Vec<String>,
+    ) -> TxResult {
         let tx_context = UnitContext {
             timestamp: self.timestamp,
             chain_id: self.chain_id,
@@ -92,26 +93,65 @@ impl VM {
         let mut outputs: Vec<Vec<u8>> = Vec::new();
         // apply units one by one.
         // stop and revert if any unit fails.
-        for unit in tx.units {
-            let result = unit.apply(&tx_context, &mut sv_boxed);
-            match result {
-                Ok(output) => {
-                    if let Some(output) = output {
-                        outputs.push(output);
-                    } else {
-                        // if output is None, unit execution does not return anything.
-                        // push empty vec.
-                        outputs.push(vec![]);
+        let (result, log) = capture_logs(||{
+            for unit in tx.units {
+                let res = unit.apply(&tx_context, &mut sv_boxed);
+                match res {
+                    Ok(output) => {
+                        if let Some(output) = output {
+                            outputs.push(output);
+                        } else {
+                            // if output is None, unit execution does not return anything.
+                            // push empty vec.
+                            outputs.push(vec![]);
+                        }
+                    }
+                    Err(e) => {
+                        // return the error.
+                        return Err(e);
                     }
                 }
-                Err(e) => {
-                    // return the error.
-                    return Err(e);
-                }
+            }
+            Ok(())
+        });
+        if result.is_err() {
+            TxResult{
+                status: false,
+                error: result.err().unwrap(),
+                exec_logs: log,
+                output: outputs,
+            }
+        }else{
+            TxResult{
+                status: true,
+                error: Box::new(NullError),
+                exec_logs: log,
+                output: outputs,
             }
         }
-        Ok(outputs)
+
     }
+}
+
+fn merge_maps<Key: std::cmp::Eq + std::hash::Hash + Clone, Op: Clone>(
+    input: HashMap<u64, HashMap<Key, Op>>,
+) -> HashMap<Key, Op> {
+    let mut merged = HashMap::new();
+
+    // Sort the keys in ascending order so we can override with higher keys last
+    let mut keys: Vec<_> = input.keys().cloned().collect();
+    keys.sort();
+
+    for k in keys {
+        if let Some(inner_map) = input.get(&k) {
+            for (inner_key, val) in inner_map {
+                // Insert or override
+                merged.insert(inner_key.clone(), val.clone());
+            }
+        }
+    }
+
+    merged
 }
 
 #[cfg(test)]
@@ -122,13 +162,16 @@ mod tests {
     use alto_storage::transactional_db::{Key, Op};
     use alto_types::account::Account;
     use alto_types::address::Address;
+    use alto_types::create_test_keypair;
     use alto_types::curr_timestamp;
+    use alto_types::signed_tx::{SignedTx, SignedTxChars};
     use alto_types::tx::{Tx, TxMethods, Unit};
     use alto_types::units::msg::SequencerMsg;
     use alto_types::units::transfer::Transfer;
     use commonware_codec::{Codec, WriteBuffer};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::vec;
 
     use super::VM;
 
@@ -138,7 +181,8 @@ mod tests {
     fn test_single_tx() {
         let state_db = Arc::new(Mutex::new(HashmapDatabase::new()));
         let cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
-        let unfinalized: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         let address = Address::create_random_address();
         let account = Account {
@@ -178,10 +222,14 @@ mod tests {
         };
         let units: Vec<Box<dyn Unit>> = vec![Box::new(tfer_unit), Box::new(msg_unit)];
         let tx = <Tx as TxMethods>::from(timestamp, units, 10, 5, 1, address);
-        let (outputs, errors) = vm.apply(vec![tx]);
-        assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].len(), 2);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].to_string(), "NoError");
+        let (pk, _sk) = create_test_keypair();
+        let stx = SignedTx::new(tx, pk, vec![]);
+        let results = vm.apply(vec![stx]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, true);
+        assert_eq!(results[0].output.len(), 2);
+        assert_eq!(results[0].output[0].len(), 0);
+        assert_eq!(results[0].error.to_string(), "NoError");
+        println!("{}", results[0].exec_logs);
     }
 }

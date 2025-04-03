@@ -14,6 +14,7 @@ documentation = "https://docs.rs/alto-chain"
 alto-types = { workspace = true }
 alto-client = { workspace = true }
 alto-storage = { workspace = true}
+alto-vm = { workspace = true}
 commonware-consensus = { workspace = true }
 commonware-cryptography = { workspace = true }
 commonware-deployer = { workspace = true }

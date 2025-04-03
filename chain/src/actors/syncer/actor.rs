@@ -13,6 +13,7 @@ use crate::{
     },
     Indexer,
 };
+use alto_storage::{database::Database, transactional_db::{Key, Op}};
 use alto_types::{Block, Finalization, Finalized, Notarized};
 use bytes::Bytes;
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
@@ -76,6 +77,14 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     finalized_height: Gauge,
     // Indexed height metric
     contiguous_height: Gauge,
+
+    // State chache.
+    state_cache: Arc<std::sync::Mutex<HashMap<Key, Op>>>,
+    // Unfinalized State.
+    // hashmap of block number -> touched keys.
+    unfinalized_state: Arc<std::sync::Mutex<HashMap<u64, HashMap<Key, Op>>>>,
+    // State database.
+    state_db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>,
 }
 
 impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Indexer> Actor<B, R, I> {
@@ -221,6 +230,10 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
 
                 finalized_height,
                 contiguous_height,
+
+                state_cache: config.state_cache,
+                unfinalized_state: config.unfinalized_state,
+                state_db: config.state_db,
             },
             Mailbox::new(sender),
         )

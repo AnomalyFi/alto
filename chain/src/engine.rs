@@ -47,6 +47,7 @@ pub struct Config<I: Indexer> {
 
     pub indexer: Option<I>,
 
+    pub chain_id: u64,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
@@ -73,7 +74,7 @@ pub struct Engine<
 
     // state
     state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-    unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
+    unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
     state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
@@ -84,7 +85,8 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
         // @todo initalizing state cache and unfinalized state.
         // if it is necessary pass state_cache, unfinalized_state and state_db to both application and syncer.
         let state_cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
-        let unfinalized_state: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
+        let unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         // Create the application
         let public = public(&cfg.identity);
@@ -96,6 +98,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 identity: cfg.identity.clone(),
                 share: cfg.share,
                 mailbox_size: cfg.mailbox_size,
+                chain_id: cfg.chain_id,
                 state_cache: Arc::clone(&state_cache),
                 unfinalized_state: Arc::clone(&unfinalized_state),
                 state_db: Arc::clone(&cfg.state_db),

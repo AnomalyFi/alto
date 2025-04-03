@@ -211,6 +211,7 @@ fn main() {
             fetch_concurrent: FETCH_CONCURRENT,
             fetch_rate_per_peer: resolver_limit,
             indexer,
+            chain_id: 10,
             state_db: wrapped_state_db,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;

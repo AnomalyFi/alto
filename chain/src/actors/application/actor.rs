@@ -9,6 +9,7 @@ use alto_storage::{
     transactional_db::{Key, Op},
 };
 use alto_types::{Block, Finalization, Notarization, Seed};
+use alto_vm::vm::VM;
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
@@ -63,9 +64,15 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
     prover: Prover<Digest>,
     hasher: Sha256,
     mailbox: mpsc::Receiver<Message>,
+    // chain id.
+    chain_id: u64,
+    // State chache.
     state_cache: Arc<Mutex<HashMap<Key, Op>>>,
-    unfinalized_state: Arc<Mutex<HashMap<Key, Op>>>,
-    staete_db: Arc<Mutex<dyn Database + Send + Sync>>,
+    // Unfinalized State.
+    // hashmap of block number -> touched keys.
+    unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
+    // State database.
+    state_db: Arc<Mutex<dyn Database + Send + Sync>>,
 }
 
 impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
@@ -78,9 +85,10 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 prover: config.prover,
                 hasher: Sha256::new(),
                 mailbox,
+                chain_id: config.chain_id,
                 state_cache: config.state_cache,
                 unfinalized_state: config.unfinalized_state,
-                staete_db: config.state_db,
+                state_db: config.state_db,
             },
             Supervisor::new(config.identity, config.participants, config.share),
             Mailbox::new(sender),
@@ -105,8 +113,6 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
         // @todo initiate fee manager here.
-        // @todo get the state view.
-        // @todo init the database.
         // @todo commit to database.
         while let Some(message) = self.mailbox.next().await {
             match message {
@@ -114,6 +120,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 Message::Genesis { response } => {
                     // Use the digest of the genesis message as the initial
                     // payload.
+                    // @todo make genesis allocations.
                     let _ = response.send(genesis_digest.clone());
                 }
                 // its this validators turn to propose the block.
@@ -134,6 +141,9 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     // continue processing other messages)
                     self.context.with_label("propose").spawn({
                         let built = built.clone();
+                        let state_cache = Arc::clone(&self.state_cache);
+                        let unfinalized_state = Arc::clone(&self.unfinalized_state);
+                        let state_db = Arc::clone(&self.state_db);
                         move |context| async move {
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
@@ -149,8 +159,20 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     // fetch transactions from mempool. 
                                     // serialize the transactions fetched from mempool into a vec<u8>.
                                     // execute the transactions and get the result?
-                                    let txs = Vec::new();
-                                    let dummy_state_root = [0u8;32];
+                                    let txs = Vec::new(); // @todo
+                                    let dummy_state_root = [0u8;32]; //@todo
+                                    // all the touched keys by the block will be added to unfinalized state.
+                                    let mut executor_vm = VM::new(
+                                        parent.height + 1,
+                                        current,
+                                        self.chain_id,
+                                        state_cache,
+                                        unfinalized_state,
+                                        state_db
+                                    );
+                                    // let (outputs, errors) = executor_vm.apply(txs.clone());
+                                    // @todo we need to keep track of touched keys per block.
+                                    // when a block gets finalised, those keys should be removed from unfinalized and moved to cache.
                                     let block = Block::new(parent.digest(), parent.height+1, current, txs, dummy_state_root.into());
                                     let digest = block.digest();
                                     {

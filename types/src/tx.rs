@@ -8,7 +8,7 @@ use crate::state_view::StateView;
 use crate::units;
 use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
-use std::time::SystemTime;
+use std::{error::Error, time::SystemTime};
 
 #[derive(Debug)]
 pub enum UnitType {
@@ -94,6 +94,14 @@ pub struct Tx {
     pub digest: Vec<u8>,
     /// address of the tx sender. wrap this in a better way.
     pub actor: Address,
+}
+
+#[derive(Debug)]
+pub struct TxResult {
+    pub status: bool,
+    pub error: Box<dyn Error>,
+    pub output: Vec<Vec<u8>>,
+    pub exec_logs: String,
 }
 
 pub trait TxMethods: Sized {
@@ -319,7 +327,6 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
     Ok(units)
 }
 
-// @todo implement tests for encoding and decoding of tx.
 #[cfg(test)]
 mod tests {
     use super::*;

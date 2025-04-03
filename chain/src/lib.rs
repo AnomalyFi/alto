@@ -292,6 +292,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    chain_id: 10,
                     state_db: wrapped_state_db,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
@@ -456,6 +457,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: None,
+                    chain_id: 10,
                     state_db: wrapped_state_db,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
@@ -544,6 +546,7 @@ mod tests {
                 fetch_concurrent: 10,
                 fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                 indexer: None,
+                chain_id: 10,
                 state_db: wrapped_state_db,
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
@@ -682,6 +685,7 @@ mod tests {
                             fetch_concurrent: 10,
                             fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                             indexer: None,
+                            chain_id: 10,
                             state_db: wrapped_state_db,
                         };
                         let engine = Engine::new(context.with_label(&uid), config).await;
@@ -831,6 +835,7 @@ mod tests {
                     fetch_concurrent: 10,
                     fetch_rate_per_peer: Quota::per_second(NonZeroU32::new(10).unwrap()),
                     indexer: Some(indexer.clone()),
+                    chain_id: 10,
                     state_db: wrapped_state_db,
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
