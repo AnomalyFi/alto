@@ -88,6 +88,6 @@ impl<H: Hasher> Batch<H> {
     }
 
     pub fn tx(&self, digest: &H::Digest) -> Option<SignedTx<H>> {
-        self.txs.iter().find(|tx| &tx.hash() == digest).map_or(None, |tx| Some(tx.clone()))
+        self.txs.iter().find(|tx| &tx.digest == digest).map_or(None, |tx| Some(tx.clone()))
     }
 }

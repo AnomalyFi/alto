@@ -37,6 +37,7 @@ type PublicKey = commonware_cryptography::ed25519::PublicKey;
 type PrivateKey = commonware_cryptography::ed25519::PrivateKey;
 type Signature = commonware_cryptography::ed25519::Signature;
 
+
 pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
     let mut rng = OsRng;
     // generates keypair using random number generator

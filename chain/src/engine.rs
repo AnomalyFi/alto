@@ -1,14 +1,14 @@
 use crate::{
-    actors::{application, syncer},
+    actors::{application, net, syncer},
     Indexer,
 };
 use alto_types::NAMESPACE;
 use commonware_consensus::threshold_simplex::{self, Engine as Consensus, Prover};
 use commonware_cryptography::{
-    bls12381::primitives::{group, poly::public, poly::Poly},
+    bls12381::primitives::{group, poly::{public, Poly}},
     ed25519::PublicKey,
     sha256::Digest,
-    Ed25519, Scheme,
+    Ed25519, Scheme, Sha256,
 };
 use commonware_p2p::{Receiver, Sender};
 use commonware_runtime::{Blob, Clock, Handle, Metrics, Spawner, Storage};
@@ -164,6 +164,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        net: net::Mailbox,
     ) -> Handle<()> {
         self.context.clone().spawn(|_| {
             self.run(
@@ -171,6 +172,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 resolver_network,
                 broadcast_network,
                 backfill_network,
+                net
             )
         })
     }
@@ -193,12 +195,13 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        net: net::Mailbox,
     ) {
         // Start the application
         let application_handle = self.application.start(self.syncer_mailbox);
 
         // Start the syncer
-        let syncer_handle = self.syncer.start(broadcast_network, backfill_network);
+        let syncer_handle = self.syncer.start(broadcast_network, backfill_network, net);
 
         // Start consensus
         let consensus_handle = self.consensus.start(voter_network, resolver_network);

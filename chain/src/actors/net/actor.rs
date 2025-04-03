@@ -46,14 +46,14 @@ struct AppState<R: Rng + Spawner + Metrics + Clock, H: Hasher>   {
 }
 
 pub struct Config<H: Hasher> {
-    pub port: i32,
+    pub port: u16,
 
     pub mempool: mempool::Mailbox<H>
 }
 
 pub struct Actor<R: Rng + Spawner + Metrics + Clock, H: Hasher> {
     context: R,
-    port: i32,
+    port: u16,
     listener: Option<TcpListener>,
     pub router: Option<axum::Router>,
     is_active: bool,
@@ -108,7 +108,7 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
         )
     }
 
-    pub async fn start(mut self) -> Handle<()> {
+    pub fn start(mut self) -> Handle<()> {
         self.context.spawn_ref()(self.run())
     }
 

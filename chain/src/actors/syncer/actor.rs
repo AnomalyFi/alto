@@ -7,10 +7,10 @@ use super::{
     Config,
 };
 use crate::{
-    actors::syncer::{
+    actors::{net, syncer::{
         handler,
         key::{self, MultiIndex, Value},
-    },
+    }},
     Indexer,
 };
 use alto_types::{Block, Finalization, Finalized, Notarized};
@@ -236,8 +236,9 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        mut net: net::Mailbox,
     ) -> Handle<()> {
-        self.context.spawn_ref()(self.run(broadcast_network, backfill_network))
+        self.context.spawn_ref()(self.run(broadcast_network, backfill_network, net))
     }
 
     /// Run the application actor.
@@ -251,6 +252,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
             impl Sender<PublicKey = PublicKey>,
             impl Receiver<PublicKey = PublicKey>,
         ),
+        mut net: net::Mailbox,
     ) {
         // Initialize resolver
         let coordinator = Coordinator::new(self.participants.clone());
@@ -321,6 +323,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
 
                         // In an application that maintains state, you would compute the state transition function here.
 
+
                         // Cancel any outstanding requests (by height and by digest)
                         resolver
                             .cancel(MultiIndex::new(Value::Finalized(next)))
@@ -330,6 +333,9 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                         resolver
                             .cancel(MultiIndex::new(Value::Digest(block.digest())))
                             .await;
+
+                        // send block to net actor and try to broadcast block to any subscribers
+                        net.broadcast_block(block).await;
 
                         // Update the latest indexed
                         self.contiguous_height.set(next as i64);

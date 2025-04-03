@@ -1,3 +1,6 @@
+pub use ingress::{Mailbox, Message};
+pub use actor::{Actor, Config};
+
 pub mod actor;
 pub mod ingress;
 

@@ -3,7 +3,7 @@ use super::{
     supervisor::Supervisor,
     Config,
 };
-use crate::actors::syncer;
+use crate::actors::{net, syncer};
 use alto_types::{Block, Finalization, Notarization, Seed};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{hash, sha256::{self, Digest}, Hasher, Sha256};

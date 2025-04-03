@@ -44,7 +44,7 @@ impl<H: Hasher> SignedTx<H> {
         self.cached_payload.get().unwrap().to_vec()
     }
 
-    pub fn size(&mut self) -> usize {
+    pub fn size(&self) -> usize {
         self.payload().len()
     }
 
