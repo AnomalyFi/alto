@@ -6,6 +6,9 @@ use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
 use crate::{PublicKey, Signature, TX_NAMESPACE};
 use commonware_cryptography::{Ed25519, Hasher, Scheme};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::iter::Once;
+
 // this is sent by the user to the validators.
 #[derive(Clone)]
 pub struct SignedTx<H: Hasher> {
@@ -16,7 +19,8 @@ pub struct SignedTx<H: Hasher> {
     pub_key: PublicKey,
     signature: Vec<u8>,
     // cached is encode of SignedTx
-    cached_payload: Vec<u8>,
+    // todo use OnceCell since payload encode is set once or use RefCell for mutable access?
+    cached_payload: OnceCell<Vec<u8>>,
 }
 
 impl<H: Hasher> Debug for SignedTx<H> {
@@ -33,11 +37,11 @@ impl<H: Hasher> Debug for SignedTx<H> {
 
 
 impl<H: Hasher> SignedTx<H> {
-    pub fn payload(&mut self) -> Vec<u8> {
-        if self.cached_payload.is_empty() {
-            self.cached_payload = self.encode();
+    pub fn payload(&self) -> Vec<u8> {
+        if self.cached_payload.get().is_none() {
+            self.cached_payload.set(self.encode()).expect("could not set cache payload");
         }
-        self.cached_payload.clone()
+        self.cached_payload.get().unwrap().to_vec()
     }
 
     pub fn size(&mut self) -> usize {
@@ -53,7 +57,7 @@ impl<H: Hasher> SignedTx<H> {
     }
 
     pub fn validate(&self) -> bool {
-
+        todo!()
     }
 
     pub fn random() -> Self {
@@ -67,7 +71,7 @@ impl<H: Hasher> SignedTx<H> {
             tx,
             pub_key: pub_key.clone(),
             signature: signature.clone(),
-            cached_payload: Vec::new(),
+            cached_payload: OnceCell::new(),
             digest
         }
     }
@@ -91,7 +95,7 @@ impl<H: Hasher> SignedTx<H> {
     }
 
     // @todo add syntactic checks.
-    pub fn encode(&mut self) -> Vec<u8> {
+    pub fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
         let raw_tx = self.tx.encode();
@@ -130,7 +134,7 @@ impl<H: Hasher> SignedTx<H> {
             pub_key: public_key.clone(),
             signature: signature.to_vec(),
             digest,
-            cached_payload: Vec::new(),
+            cached_payload: OnceCell::new(),
         })
     }
 
@@ -146,7 +150,7 @@ impl<H: Hasher> SignedTx<H> {
             signature: wallet.sign(&tx_data),
             pub_key: wallet.public_key(),
             digest,
-            cached_payload: Vec::new(),
+            cached_payload: OnceCell::new(),
         }
     }
 }
@@ -216,7 +220,7 @@ mod tests {
             chain_id,
             units: units.clone(),
             id,
-            digest: digest.to_vec(),
+            digest: OnceCell::from(digest.to_vec()),
             actor: Address::empty(),
         };
         let digest = sha256::hash(&[0; 32]);
@@ -225,7 +229,7 @@ mod tests {
             pub_key: pk,
             signature: vec![],
             digest,
-            cached_payload: vec![],
+            cached_payload: OnceCell::new(),
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);

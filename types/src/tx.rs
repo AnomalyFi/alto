@@ -96,7 +96,7 @@ pub struct Tx<H: Hasher> {
     /// id is the transaction id. It is the hash of digest.
     pub id: H::Digest,
     /// digest is encoded tx.
-    pub digest: Vec<u8>,
+    pub digest: OnceCell<Vec<u8>>,
     /// address of the tx sender. wrap this in a better way.
     pub actor: Address,
 
@@ -187,33 +187,34 @@ impl<H: Hasher> Tx<H> {
         tx
     }
 
-    pub fn encode(&mut self) -> Vec<u8> {
-        if self.digest.is_empty() {
-            return self.digest.clone();
+    pub fn encode(&self) -> Vec<u8> {
+        if self.digest.get().is_some() {
+            return self.digest.get().unwrap().to_vec();
         }
+        let mut digest: Vec<u8> = Vec::new();
         // pack tx timestamp.
-        self.digest.extend(self.timestamp.to_be_bytes());
+        digest.extend(self.timestamp.to_be_bytes());
         // pack max fee
-        self.digest.extend(self.max_fee.to_be_bytes());
+        digest.extend(self.max_fee.to_be_bytes());
         // pack priority fee
-        self.digest.extend(self.priority_fee.to_be_bytes());
+        digest.extend(self.priority_fee.to_be_bytes());
         // pack chain id
-        self.digest.extend(self.chain_id.to_be_bytes());
+        digest.extend(self.chain_id.to_be_bytes());
         // pack # of units.
-        self.digest.extend((self.units.len() as u64).to_be_bytes());
+        digest.extend((self.units.len() as u64).to_be_bytes());
         // pack individual units
         self.units.iter().for_each(|unit| {
             let unit_bytes = unit.encode();
             // pack the unit type info.
-            self.digest.extend((unit.unit_type() as u8).to_be_bytes());
+            digest.extend((unit.unit_type() as u8).to_be_bytes());
             // pack len of individual unit.
-            self.digest.extend((unit_bytes.len() as u64).to_be_bytes());
+            digest.extend((unit_bytes.len() as u64).to_be_bytes());
             // pack individual unit.
-            self.digest.extend_from_slice(&unit_bytes);
+            digest.extend_from_slice(&unit_bytes);
         });
-
+        self.digest.set(digest).expect("cannot set digest");
         // return encoded digest.
-        self.digest.clone()
+        self.digest.get().unwrap().to_vec()
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
@@ -221,7 +222,7 @@ impl<H: Hasher> Tx<H> {
             return Err("Empty bytes".to_string());
         }
         let mut tx = Self::default();
-        tx.digest = bytes.to_vec(); // @todo ??
+        tx.digest = OnceCell::from(bytes.to_vec()); // @todo ??
         tx.timestamp = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
         tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
@@ -260,7 +261,7 @@ impl<H: Hasher> Default for Tx<H> {
             priority_fee: 0,
             chain_id: 19517,
             id: hasher.finalize(),
-            digest: vec![],
+            digest: OnceCell::new(),
             actor: Address::empty(),
         }
     }
@@ -360,7 +361,7 @@ mod tests {
             units: units.clone(),
             id,
             actor: Address::empty(),
-            digest: digest.to_vec(),
+            digest: OnceCell::from(digest.to_vec()),
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
