@@ -218,7 +218,7 @@ fn main() {
             indexer,
             chain_id: 10,
             state_db: wrapped_state_db,
-            genesis: genesis,
+            genesis,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 

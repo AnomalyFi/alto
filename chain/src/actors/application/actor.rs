@@ -146,7 +146,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                             let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
                             let acc = Account {
                                 address: adrs,
-                                balance: allo.clone(),
+                                balance: *allo,
                             };
                             // write the account to the buffer.
                             acc.write(&mut write_buf);
@@ -362,8 +362,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                             }
                             info!(view, "finalized block with touched keys");
                         }
-                    } else {
-                    }
+                    } 
 
                     // Send the finalization to the syncer
                     syncer.finalized(finalization, seed).await;

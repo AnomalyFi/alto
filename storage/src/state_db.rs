@@ -40,13 +40,20 @@ impl StateView for StateViewDb<'_> {
     }
 
     fn get_balance(&mut self, address: &Address) -> Option<Balance> {
+        info!("Getting balance for address: {}", address);
         match self.get_account(address) {
             // return balance if account exists
             Ok(Some(acc)) => Some(acc.balance),
             // return 0 if no account
-            Ok(None) => Some(0),
+            Ok(None) => {
+                info!("Account not found, returning 0 balance");
+                Some(0)
+            }
             // return none if an err occurred
-            Err(_) => None,
+            Err(e) => {
+                warn!("Error getting account: {}", e);
+                None
+            }
         }
     }
 

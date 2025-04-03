@@ -12,7 +12,7 @@ use alto_storage::{
 use alto_types::null_error::NullError;
 use alto_types::state_view::StateView;
 use alto_types::{
-    signed_tx::SignedTx,
+    signed_tx::{SignedTx, SignedTxChars},
     tx::{Tx, TxMethods, TxResult, UnitContext},
 };
 
@@ -58,7 +58,8 @@ impl VM {
         let mut results = Vec::new();
         for stx in stxs {
             let mut state_view = StateViewDb::new(&mut in_mem_db);
-            let tx = stx.tx;
+            let mut tx = stx.tx.clone();
+            tx.set_actor(stx.address());
             let result = self.apply_tx(tx, &mut state_view);
             if result.status {
                 let _ = in_mem_db.commit_last_tx();
