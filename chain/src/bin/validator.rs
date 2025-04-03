@@ -33,7 +33,7 @@ use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
-const METRICS_PORT: u16 = 9090;
+// const METRICS_PORT: u16 = 9090;
 
 const VOTER_CHANNEL: u32 = 0;
 const RESOLVER_CHANNEL: u32 = 1;
@@ -51,6 +51,7 @@ const MAX_FETCH_COUNT: usize = 16;
 const MAX_FETCH_SIZE: usize = 512 * 1024;
 
 fn main() {
+
     // Parse arguments
     let matches = Command::new("validator")
         .about("Validator for an alto chain.")
@@ -101,6 +102,7 @@ fn main() {
     let identity = poly::Public::deserialize(&identity, threshold).expect("Identity is invalid");
     let identity_public = poly::public(&identity);
     let public_key = signer.public_key();
+    let metrics_port = config.metrics_port;
     let ip = peers.get(&public_key).expect("Could not find self in IPs");
     info!(
         ?public_key,
@@ -278,8 +280,8 @@ fn main() {
         });
 
         // Serve metrics
-        let metrics = context.with_label("metrics").spawn(|context| async move {
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), METRICS_PORT);
+        let metrics = context.with_label("metrics").spawn(move |context| async move {
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), metrics_port);
             let listener = context
                 .bind(addr)
                 .await
