@@ -19,8 +19,9 @@ mod ingress;
 pub use ingress::Mailbox;
 mod router;
 mod supervisor;
-
 pub use supervisor::Supervisor;
+
+use crate::GenesisAllocations;
 
 /// Configuration for the application.
 pub struct Config {
@@ -43,4 +44,5 @@ pub struct Config {
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
     pub unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>>,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
+    pub genesis: GenesisAllocations,
 }

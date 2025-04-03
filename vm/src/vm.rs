@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::vec;
 
@@ -14,7 +13,7 @@ use alto_types::null_error::NullError;
 use alto_types::state_view::StateView;
 use alto_types::{
     signed_tx::SignedTx,
-    tx::{Tx, TxMethods, UnitContext, TxResult},
+    tx::{Tx, TxMethods, TxResult, UnitContext},
 };
 
 pub struct VM {
@@ -48,7 +47,7 @@ impl VM {
     // applies new set of txs on the given state.
     // apply assumes apply is equivalent to executing all the txs in a block.
     // and moves all the touched state by the txs into unfinalized state.
-    pub fn apply(&mut self, stxs: Vec<SignedTx>) -> Vec<TxResult>{
+    pub fn apply(&mut self, stxs: Vec<SignedTx>) -> Vec<TxResult> {
         let unfinalized_state_for_in_mem =
             merge_maps(self.unfinalized_state.lock().unwrap().clone());
         let mut in_mem_db = InMemoryCachingTransactionalDb::new(
@@ -63,7 +62,7 @@ impl VM {
             let result = self.apply_tx(tx, &mut state_view);
             if result.status {
                 let _ = in_mem_db.commit_last_tx();
-            }else{
+            } else {
                 let _ = in_mem_db.rollback_last_tx();
             }
             results.push(result);
@@ -93,7 +92,7 @@ impl VM {
         let mut outputs: Vec<Vec<u8>> = Vec::new();
         // apply units one by one.
         // stop and revert if any unit fails.
-        let (result, log) = capture_logs(||{
+        let (result, log) = capture_logs(|| {
             for unit in tx.units {
                 let res = unit.apply(&tx_context, &mut sv_boxed);
                 match res {
@@ -115,21 +114,20 @@ impl VM {
             Ok(())
         });
         if result.is_err() {
-            TxResult{
+            TxResult {
                 status: false,
-                error: result.err().unwrap(),
+                error: result.err().unwrap().to_string(),
                 exec_logs: log,
                 output: outputs,
             }
-        }else{
-            TxResult{
+        } else {
+            TxResult {
                 status: true,
-                error: Box::new(NullError),
+                error: NullError.to_string(),
                 exec_logs: log,
                 output: outputs,
             }
         }
-
     }
 }
 

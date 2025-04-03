@@ -1,4 +1,5 @@
-use alto_chain::Config;
+use alto_chain::{Config, GenesisAllocations};
+use alto_types::address::Address;
 use clap::{value_parser, Arg, ArgMatches, Command};
 use commonware_cryptography::{
     bls12381::{
@@ -298,6 +299,18 @@ fn generate(sub_matches: &ArgMatches) {
     let file = fs::File::create(&path).unwrap();
     serde_yaml::to_writer(file, &config).unwrap();
     info!(path = "config.yaml", "wrote configuration file");
+
+    // genesis @todo this is a simple genesis implementation.
+    // addr should be considered along with the values.
+    let addr1 = Address::create_random_address();
+    let genesis = GenesisAllocations {
+        address: vec![*addr1.as_bytes()],
+        value: vec![1000000000000],
+    };
+    let genesis_path = format!("{}/genesis.yaml", output);
+    let file = fs::File::create(&genesis_path).unwrap();
+    serde_yaml::to_writer(file, &genesis).unwrap();
+    info!(path = "genesis.yaml", "wrote genesis file");
 }
 
 fn indexer(sub_matches: &ArgMatches) {

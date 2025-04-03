@@ -1,4 +1,4 @@
-use alto_chain::{engine, Config};
+use alto_chain::{engine, Config, GenesisAllocations};
 use alto_client::Client;
 use alto_storage::rocks_db::RocksDbDatabase;
 use alto_types::P2P_NAMESPACE;
@@ -56,6 +56,7 @@ fn main() {
         .about("Validator for an alto chain.")
         .arg(Arg::new("peers").long("peers").required(true))
         .arg(Arg::new("config").long("config").required(true))
+        .arg(Arg::new("genesis").long("genesis").required(true))
         .get_matches();
 
     // Create logger
@@ -81,7 +82,11 @@ fn main() {
         .collect();
     info!(peers = peers.len(), "loaded peers");
     let peers_u32 = peers.len() as u32;
-
+    // @todo load genesis and use to initiate the application.
+    let genesis_file = matches.get_one::<String>("genesis").unwrap();
+    let genesis_file = std::fs::read_to_string(genesis_file).expect("Could not read genesis file");
+    let genesis: GenesisAllocations =
+        serde_yaml::from_str(&genesis_file).expect("Could not parse genesis file");
     // Load config
     let config_file = matches.get_one::<String>("config").unwrap();
     let config_file = std::fs::read_to_string(config_file).expect("Could not read config file");
@@ -213,6 +218,7 @@ fn main() {
             indexer,
             chain_id: 10,
             state_db: wrapped_state_db,
+            genesis: genesis,
         };
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 

@@ -1,10 +1,13 @@
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    io::copy,
+};
 
 use crate::{PublicKey, ADDRESSLEN};
+use commonware_cryptography::sha256::hash;
 use commonware_utils::hex;
 use more_asserts::assert_le;
 use rand::Rng;
-
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct Address(pub [u8; ADDRESSLEN]);
 
@@ -23,11 +26,10 @@ impl Address {
     }
 
     pub fn from_pub_key(pub_key: &PublicKey) -> Self {
-        // @todo implement a hasher to derive the address from the public key.
-        assert_le!(pub_key.len(), ADDRESSLEN, "public key is too large");
-        let mut arr = [0u8; ADDRESSLEN];
-        arr[..pub_key.len()].copy_from_slice(pub_key.as_ref());
-        Address(arr)
+        let hashed = hash(pub_key.as_ref());
+        let mut addr = Address::empty();
+        addr.0.copy_from_slice(&hashed);
+        addr
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
@@ -60,3 +62,5 @@ impl Display for Address {
         write!(f, "{}", hex(&self.0))
     }
 }
+
+// @todo write tests for all the methods.

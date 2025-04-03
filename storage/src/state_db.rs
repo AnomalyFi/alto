@@ -7,7 +7,7 @@ use commonware_codec::{Codec, ReadBuffer, WriteBuffer};
 use std::error::Error;
 use tracing::{info, warn};
 const ACCOUNTS_PREFIX: u8 = 0x0;
-const DB_WRITE_BUFFER_CAPACITY: usize = 500;
+pub const DB_WRITE_BUFFER_CAPACITY: usize = 500;
 
 /// StateViewDb is a wrapper around TransactionalDb that provides StateViews for block execution.
 /// StateViewDb simplifies the interactions with state by providing methods that abstract away the underlying database operations.

@@ -1,6 +1,6 @@
 use crate::{
     actors::{application, syncer},
-    Indexer,
+    GenesisAllocations, Indexer,
 };
 use alto_storage::{
     database::Database,
@@ -49,6 +49,7 @@ pub struct Config<I: Indexer> {
 
     pub chain_id: u64,
     pub state_db: Arc<Mutex<dyn Database + Send + Sync>>,
+    pub genesis: GenesisAllocations,
 }
 
 pub struct Engine<
@@ -84,6 +85,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
     pub async fn new(context: E, cfg: Config<I>) -> Self {
         // @todo initalizing state cache and unfinalized state.
         // if it is necessary pass state_cache, unfinalized_state and state_db to both application and syncer.
+        let results = Arc::new(Mutex::new(HashMap::new()));
         let state_cache: Arc<Mutex<HashMap<Key, Op>>> = Arc::new(Mutex::new(HashMap::new()));
         let unfinalized_state: Arc<Mutex<HashMap<u64, HashMap<Key, Op>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -102,6 +104,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 state_cache: Arc::clone(&state_cache),
                 unfinalized_state: Arc::clone(&unfinalized_state),
                 state_db: Arc::clone(&cfg.state_db),
+                genesis: cfg.genesis.clone(),
             },
         );
 
@@ -117,6 +120,7 @@ impl<B: Blob, E: Clock + GClock + Rng + CryptoRng + Spawner + Storage<B> + Metri
                 backfill_quota: cfg.backfill_quota,
                 activity_timeout: cfg.activity_timeout,
                 indexer: cfg.indexer,
+                results: Arc::clone(&results),
                 state_cache: Arc::clone(&state_cache),
                 unfinalized_state: Arc::clone(&unfinalized_state),
                 state_db: Arc::clone(&cfg.state_db),

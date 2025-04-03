@@ -3,13 +3,16 @@ use super::{
     supervisor::Supervisor,
     Config,
 };
-use crate::actors::syncer;
+use crate::{actors::syncer, GenesisAllocations};
+use alto_storage::state_db::DB_WRITE_BUFFER_CAPACITY;
 use alto_storage::{
     database::Database,
+    state_db::StateViewDb,
     transactional_db::{Key, Op},
 };
-use alto_types::{Block, Finalization, Notarization, Seed};
+use alto_types::{account::Account, address::Address, Block, Finalization, Notarization, Seed};
 use alto_vm::vm::VM;
+use commonware_codec::{Codec, WriteBuffer};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
 use commonware_macros::select;
@@ -66,7 +69,9 @@ pub struct Actor<R: Rng + Spawner + Metrics + Clock> {
     mailbox: mpsc::Receiver<Message>,
     // chain id.
     chain_id: u64,
-    // State chache.
+    // genesis allocations.
+    genesis: GenesisAllocations,
+    // State cache.
     state_cache: Arc<Mutex<HashMap<Key, Op>>>,
     // Unfinalized State.
     // hashmap of block number -> touched keys.
@@ -86,6 +91,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 hasher: Sha256::new(),
                 mailbox,
                 chain_id: config.chain_id,
+                genesis: config.genesis,
                 state_cache: config.state_cache,
                 unfinalized_state: config.unfinalized_state,
                 state_db: config.state_db,
@@ -120,7 +126,30 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                 Message::Genesis { response } => {
                     // Use the digest of the genesis message as the initial
                     // payload.
-                    // @todo make genesis allocations.
+
+                    // @todo check formating of genesis in validator.rs
+                    let address = self.genesis.address.clone();
+                    let allocations = self.genesis.value.clone();
+                    // lock state database.
+                    let mut s_db = self.state_db.lock().unwrap();
+                    // zip address with allocation.
+                    address
+                        .iter()
+                        .zip(allocations.iter())
+                        .for_each(|(addr, allo)| {
+                            // create key from address
+                            let adrs = Address(*addr);
+                            let key = StateViewDb::key_accounts(&adrs);
+                            let mut write_buf = WriteBuffer::new(DB_WRITE_BUFFER_CAPACITY);
+                            let acc = Account {
+                                address: adrs,
+                                balance: allo.clone(),
+                            };
+                            // write the account to the buffer.
+                            acc.write(&mut write_buf);
+                            // store the account in the state database.
+                            let _ = s_db.put(&key, write_buf.as_ref());
+                        });
                     let _ = response.send(genesis_digest.clone());
                 }
                 // its this validators turn to propose the block.
@@ -159,8 +188,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     // fetch transactions from mempool. 
                                     // serialize the transactions fetched from mempool into a vec<u8>.
                                     // execute the transactions and get the result?
-                                    let txs = Vec::new(); // @todo
-                                    let dummy_state_root = [0u8;32]; //@todo
+                                    let txs = Vec::new(); // @todo get txs from mempool.
                                     // all the touched keys by the block will be added to unfinalized state.
                                     let mut executor_vm = VM::new(
                                         parent.height + 1,
@@ -170,9 +198,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         unfinalized_state,
                                         state_db
                                     );
-                                    // let (outputs, errors) = executor_vm.apply(txs.clone());
-                                    // @todo we need to keep track of touched keys per block.
-                                    // when a block gets finalised, those keys should be removed from unfinalized and moved to cache.
+                                    let results = executor_vm.apply(txs.clone()); // @todo store results seperately.
+                                    let dummy_state_root = [0u8;32]; //@todo 
+                                    // touched keys per block are stored in unfinalized state.
+                                    // when a block finalises, touched keys are removed from unfinalized state and moved to cache afte writing to db.
+                                    // @todo post finalisation moving to cache and db, removing unfinalized state.
                                     let block = Block::new(parent.digest(), parent.height+1, current, txs, dummy_state_root.into());
                                     let digest = block.digest();
                                     {

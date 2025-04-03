@@ -13,8 +13,11 @@ use crate::{
     },
     Indexer,
 };
-use alto_storage::{database::Database, transactional_db::{Key, Op}};
-use alto_types::{Block, Finalization, Finalized, Notarized};
+use alto_storage::{
+    database::Database,
+    transactional_db::{Key, Op},
+};
+use alto_types::{tx::TxResult, Block, Finalization, Finalized, Notarized};
 use bytes::Bytes;
 use commonware_cryptography::{bls12381, ed25519::PublicKey, sha256::Digest};
 use commonware_macros::select;
@@ -58,6 +61,9 @@ pub struct Actor<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<
     activity_timeout: u64,
     indexer: Option<I>,
 
+    // @todo this should be improvised. results should be streamed as soon as the block is finalised.
+    // and should be stored in a seperate db and maintained by rpc services.
+    results: Arc<std::sync::Mutex<HashMap<Digest, Vec<TxResult>>>>,
     // Blocks verified stored by view<>digest
     verified: Archive<TwoCap, Digest, B, R>,
     // Blocks notarized stored by view<>digest
@@ -219,6 +225,8 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                 backfill_quota: config.backfill_quota,
                 activity_timeout: config.activity_timeout,
                 indexer: config.indexer,
+
+                results: config.results,
 
                 verified: verified_archive,
                 notarized: notarized_archive,

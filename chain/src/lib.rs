@@ -79,11 +79,17 @@ pub struct Config {
     pub state_db_directory: String,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct GenesisAllocations {
+    pub address: Vec<[u8; 32]>,
+    pub value: Vec<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alto_storage::rocks_db::RocksDbDatabase;
-    use alto_types::{Finalized, Notarized, Seed};
+    use alto_types::{address::Address, Finalized, Notarized, Seed};
     use bls12381::primitives::poly;
     use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
     use commonware_macros::test_traced;
@@ -231,6 +237,12 @@ mod tests {
         };
         let (executor, mut context, auditor) = Executor::init(cfg);
         executor.start(async move {
+            let addr1 = Address::create_random_address();
+            let addr2 = Address::create_random_address();
+            let genesis = GenesisAllocations {
+                address: vec![*addr1.as_bytes(), *addr2.as_bytes()],
+                value: vec![1000000000000, 1000000000000],
+            };
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -294,6 +306,7 @@ mod tests {
                     indexer: None,
                     chain_id: 10,
                     state_db: wrapped_state_db,
+                    genesis: genesis.clone(),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -383,6 +396,12 @@ mod tests {
         let final_container_required = 20;
         let (executor, mut context, _) = Executor::timed(Duration::from_secs(30));
         executor.start(async move {
+            let addr1 = Address::create_random_address();
+            let addr2 = Address::create_random_address();
+            let genesis = GenesisAllocations {
+                address: vec![*addr1.as_bytes(), *addr2.as_bytes()],
+                value: vec![1000000000000, 1000000000000],
+            };
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -459,6 +478,7 @@ mod tests {
                     indexer: None,
                     chain_id: 10,
                     state_db: wrapped_state_db,
+                    genesis: genesis.clone(),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -548,6 +568,7 @@ mod tests {
                 indexer: None,
                 chain_id: 10,
                 state_db: wrapped_state_db,
+                genesis: genesis.clone(),
             };
             let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -617,6 +638,12 @@ mod tests {
         while !*done.lock().unwrap() {
             runs += 1;
             executor.start({
+                let addr1 = Address::create_random_address();
+                let addr2 = Address::create_random_address();
+                let genesis = GenesisAllocations {
+                    address: vec![*addr1.as_bytes(), *addr2.as_bytes()],
+                    value: vec![1000000000000, 1000000000000],
+                };
                 let mut context = context.clone();
                 let public = public.clone();
                 let shares = shares.clone();
@@ -687,6 +714,7 @@ mod tests {
                             indexer: None,
                             chain_id: 10,
                             state_db: wrapped_state_db,
+                            genesis: genesis.clone(),
                         };
                         let engine = Engine::new(context.with_label(&uid), config).await;
 
@@ -765,6 +793,12 @@ mod tests {
         let required_container = 10;
         let (executor, mut context, _) = Executor::timed(Duration::from_secs(30));
         executor.start(async move {
+            let addr1 = Address::create_random_address();
+            let addr2 = Address::create_random_address();
+            let genesis = GenesisAllocations {
+                address: vec![*addr1.as_bytes(), *addr2.as_bytes()],
+                value: vec![1000000000000, 1000000000000],
+            };
             // Create simulated network
             let (network, mut oracle) = Network::new(
                 context.with_label("network"),
@@ -837,6 +871,7 @@ mod tests {
                     indexer: Some(indexer.clone()),
                     chain_id: 10,
                     state_db: wrapped_state_db,
+                    genesis: genesis.clone(),
                 };
                 let engine = Engine::new(context.with_label(&uid), config).await;
 

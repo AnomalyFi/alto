@@ -99,7 +99,7 @@ pub struct Tx {
 #[derive(Debug)]
 pub struct TxResult {
     pub status: bool,
-    pub error: Box<dyn Error>,
+    pub error: String,
     pub output: Vec<Vec<u8>>,
     pub exec_logs: String,
 }

@@ -2,7 +2,8 @@ use alto_storage::{
     database::Database,
     transactional_db::{Key, Op},
 };
-use commonware_cryptography::{bls12381::primitives::group, ed25519::PublicKey};
+use alto_types::tx::TxResult;
+use commonware_cryptography::{bls12381::primitives::group, ed25519::PublicKey, sha256::Digest};
 use governor::Quota;
 use std::{
     collections::HashMap,
@@ -41,6 +42,8 @@ pub struct Config<I: Indexer> {
     pub activity_timeout: u64,
 
     pub indexer: Option<I>,
+
+    pub results: Arc<Mutex<HashMap<Digest, Vec<TxResult>>>>,
 
     // State
     pub state_cache: Arc<Mutex<HashMap<Key, Op>>>,
