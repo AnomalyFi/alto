@@ -8,9 +8,9 @@ use alto_storage::state_db::DB_WRITE_BUFFER_CAPACITY;
 use alto_storage::{
     database::Database,
     state_db::StateViewDb,
-    transactional_db::{Key, Op},
+    transactional_db::{Key, Op, OpAction},
 };
-use alto_types::{account::Account, address::Address, Block, Finalization, Notarization, Seed};
+use alto_types::{account::Account, address::Address, Block, Finalization, Notarization, Seed, signed_tx::unpack_signed_txs};
 use alto_vm::vm::VM;
 use commonware_codec::{Codec, WriteBuffer};
 use commonware_consensus::threshold_simplex::Prover;
@@ -27,9 +27,7 @@ use futures::{
 };
 use rand::Rng;
 use std::{
-    collections::HashMap,
-    pin::Pin,
-    sync::{Arc, Mutex},
+    collections::HashMap, pin::Pin, sync::{Arc, Mutex}
 };
 use tracing::{info, warn};
 
@@ -173,6 +171,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                         let state_cache = Arc::clone(&self.state_cache);
                         let unfinalized_state = Arc::clone(&self.unfinalized_state);
                         let state_db = Arc::clone(&self.state_db);
+                        let mut syncer_clone = syncer.clone();
                         move |context| async move {
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
@@ -209,10 +208,12 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         let mut built = built.lock().unwrap();
                                         *built = Some(block);
                                     }
-
+                                    
                                     // Send the digest to the consensus
                                     let result = response.send(digest.clone());
                                     info!(view, ?digest, success=result.is_ok(), "proposed new block");
+                                    // send the result to syncer.
+                                    syncer_clone.store_results(digest, results).await;
                                 },
                                 _ = response_closed => {
                                     // The response was cancelled
@@ -245,14 +246,16 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     } else {
                         Either::Right(syncer.get(Some(parent.0), parent.1).await)
                     };
-
+                    let state_cache = Arc::clone(&self.state_cache);
+                    let unfinalized_state = Arc::clone(&self.unfinalized_state);
+                    let state_db = Arc::clone(&self.state_db);
                     // Wait for the blocks to be available or the request to be cancelled in a separate task (to
                     // continue processing other messages)
                     self.context.with_label("verify").spawn({
                         let mut syncer = syncer.clone();
                         move |context| async move {
                             let requester =
-                                try_join(parent_request, syncer.get(None, payload).await);
+                                try_join(parent_request, syncer.get(None, payload.clone()).await);
                             let response_closed = oneshot_closed_future(&mut response);
                             select! {
                                 result = requester => {
@@ -277,11 +280,32 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         let _ = response.send(false);
                                         return;
                                     }
-                                    //@todo unmarshall txs, execute txs, generate state root, collect fees, build state root, verify state root.
 
+                                    // State transition checks.
+
+                                    // unpack transactions from the block.
+                                    let stxs = unpack_signed_txs(block.raw_txs.clone());
+                                    // create a new vm instance.
+                                    let mut executor_vm = VM::new(
+                                        block.height,
+                                        block.timestamp,
+                                        self.chain_id,
+                                        state_cache,
+                                        unfinalized_state,
+                                        state_db
+                                    );
+                                    // apply transactions.
+                                    let results = executor_vm.apply(stxs.clone());
+                                    // state root generation.
+                                    let dummy_state_root = [0u8;32]; //@todo 
+                                    // verify state root equivalence.
+                                    if block.state_root != dummy_state_root.into() {
+                                        let _ = response.send(false);
+                                        return;
+                                    }
                                     // Persist the verified block
                                     syncer.verified(view, block).await;
-
+                                    syncer.store_results(payload, results).await;
                                     // Send the verification result to the consensus
                                     let _ = response.send(true);
                                 },
@@ -304,6 +328,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     syncer.notarized(notarization, seed).await;
                 }
                 Message::Finalized { proof, payload } => {
+                    // @todo let state changes be restricted to application.
                     // Parse the proof
                     let (view, parent, _, signature, seed) =
                         self.prover.deserialize_finalization(proof.clone()).unwrap();
@@ -311,6 +336,32 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let seed = Seed::new(view, seed.into());
 
                     // @todo syncer does the heavy lifting of post finalization processing.
+                    if let Some(at_view_touched) = self.unfinalized_state.lock().unwrap().remove(&view){
+                        if at_view_touched.is_empty(){
+                            info!(view, "finalized block with no touched keys");
+                        }else{
+                            // lock state database.
+                            let mut s_db = self.state_db.lock().unwrap();
+                            // iterate over the touched keys and write to the state database.
+                            for (key, op) in at_view_touched.iter(){
+                                match op.action {
+                                    OpAction::Update => {
+                                        let _ = s_db.put(key, &op.value);
+                                    },
+                                    OpAction::Delete => {
+                                        let _ = s_db.delete(key);
+                                    },
+                                    _ =>{
+                                        /*nothing to do with the database. */
+                                    }
+                                }
+                            }
+                            info!(view, "finalized block with touched keys");
+                        }
+                    }else{
+
+                    }
+
                     // Send the finalization to the syncer
                     syncer.finalized(finalization, seed).await;
                 }

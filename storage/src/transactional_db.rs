@@ -74,7 +74,7 @@ impl InMemoryCachingTransactionalDb {
     pub fn new(
         cache: Arc<Mutex<HashMap<Key, Op>>>,
         unfinalized: Arc<Mutex<HashMap<Key, Op>>>,
-        db: Arc<std::sync::Mutex<dyn Database + Send + Sync>>,
+        db: Arc<Mutex<dyn Database + Send + Sync>>,
     ) -> Self {
         Self {
             cache,

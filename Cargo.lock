@@ -114,6 +114,7 @@ dependencies = [
  "bytes",
  "commonware-codec",
  "commonware-cryptography",
+ "futures",
  "rand",
  "rocksdb",
  "tempfile",

@@ -297,12 +297,14 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
         );
         resolver_engine.start(backfill_network);
 
+        // @todo block syncing process is happening here.
         // Process all finalized blocks in order (fetching any that are missing)
         let last_view_processed = Arc::new(Mutex::new(0));
         let verified = Wrapped::new(self.verified);
         let notarized = Wrapped::new(self.notarized);
         let finalized = Wrapped::new(self.finalized);
         let blocks = Wrapped::new(self.blocks);
+        let results = Arc::clone(&self.results);
         let (mut finalizer_sender, mut finalizer_receiver) = mpsc::channel::<()>(1);
         self.context.with_label("finalizer").spawn({
             let mut resolver = resolver.clone();
@@ -485,6 +487,9 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                 mailbox_message = self.mailbox.next() => {
                     let message = mailbox_message.expect("Mailbox closed");
                     match message {
+                        Message::StoreResults {payload, result} => {
+                            results.lock().unwrap().insert(payload, result);
+                        }
                         Message::Broadcast { payload } => {
                             broadcast_network
                                 .0
@@ -612,6 +617,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                                 let view = proof.view;
                                 let digest = proof.payload.clone();
                                 let height = block.height;
+                                // if we have block either in verified or notarized, it means we have the block verified and unfinalized state map.
                                 finalized
                                     .put(height, proof.payload.clone(), proof.serialize().into())
                                     .await
@@ -714,6 +720,7 @@ impl<B: Blob, R: Rng + Spawner + Metrics + Clock + GClock + Storage<B>, I: Index
                             debug!(view, ?payload, "registering waiter");
                             waiters.entry(payload).or_default().push(response);
                         }
+
                     }
                 },
                 // Handle incoming broadcasts

@@ -1,4 +1,4 @@
-use alto_types::{Block, Finalization, Notarization, Seed};
+use alto_types::{tx::TxResult, Block, Finalization, Notarization, Seed};
 use commonware_cryptography::sha256::Digest;
 use futures::{
     channel::{mpsc, oneshot},
@@ -26,6 +26,10 @@ pub enum Message {
     Finalized {
         proof: Finalization,
         seed: Seed,
+    },
+    StoreResults {
+        payload: Digest,
+        result: Vec<TxResult>,
     },
 }
 
@@ -82,5 +86,14 @@ impl Mailbox {
             .send(Message::Finalized { proof, seed })
             .await
             .expect("Failed to send lock");
+    }
+
+    /// store results, stores block execution results in in mem cache.
+    /// @todo find a better way to store results.
+    pub async fn store_results(&mut self, payload: Digest, result: Vec<TxResult>) {
+        self.sender
+            .send(Message::StoreResults { payload, result })
+            .await
+            .expect("Failed to send store results");
     }
 }
