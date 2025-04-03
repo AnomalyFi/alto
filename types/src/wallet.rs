@@ -38,7 +38,7 @@ pub struct Wallet {
 // wallet generation, management, and signing should be functions of the wallet.
 pub trait WalletMethods {
     // create a new wallet using the given randomness.
-    fn generate<R: CryptoRng + Rng>(r: &mut R) -> Self;
+    fn generate() -> Self;
     // load signer from bytes rep of a private key and initialize the wallet.
     fn load(&self, priv_key: &[u8]) -> Self;
     // sign the given arbitary data with the private key of the wallet.
@@ -59,8 +59,9 @@ pub trait WalletMethods {
 }
 
 impl WalletMethods for Wallet {
-    fn generate<R: CryptoRng + Rng>(r: &mut R) -> Self {
-        let signer = Ed25519::new(r);
+    fn generate() -> Self {
+        let mut rng = rand::thread_rng();
+        let signer = Ed25519::new(&mut rng);
         let pub_key = signer.public_key();
         let address = Address::from_pub_key(&pub_key);
         Self {

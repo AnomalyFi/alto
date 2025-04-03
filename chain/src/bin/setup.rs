@@ -12,7 +12,7 @@ use commonware_cryptography::{
 use commonware_deployer::ec2;
 use commonware_utils::{from_hex_formatted, hex, quorum};
 use rand::{rngs::OsRng, seq::IteratorRandom};
-use std::{collections::BTreeMap, path::Path, fs};
+use std::{collections::BTreeMap, fs, path::Path};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -144,7 +144,7 @@ fn main() {
                         .long("storage-dir")
                         .required(false)
                         .default_value("/tmp/alto")
-                        .value_parser(value_parser!(String))
+                        .value_parser(value_parser!(String)),
                 )
                 .arg(
                     Arg::new("peers")
@@ -163,12 +163,6 @@ fn main() {
                         .long("worker-threads")
                         .required(true)
                         .value_parser(value_parser!(usize)),
-                )
-                .arg(
-                    Arg::new("log_level")
-                        .long("log-level")
-                        .required(true)
-                        .value_parser(value_parser!(String)),
                 )
                 .arg(
                     Arg::new("message_backlog")
@@ -377,12 +371,14 @@ fn generate(sub_matches: &ArgMatches) {
 
 fn generate_local(sub_matches: &ArgMatches) {
     // Extract arguments
-    let storage_dir = sub_matches.get_one::<String>("storage_dir").unwrap().clone();
+    let storage_dir = sub_matches
+        .get_one::<String>("storage_dir")
+        .unwrap()
+        .clone();
     let peers = *sub_matches.get_one::<usize>("peers").unwrap();
     let bootstrappers = *sub_matches.get_one::<usize>("bootstrappers").unwrap();
 
     let worker_threads = *sub_matches.get_one::<usize>("worker_threads").unwrap();
-    let log_level = sub_matches.get_one::<String>("log_level").unwrap().clone();
     let message_backlog = *sub_matches.get_one::<usize>("message_backlog").unwrap();
     let mailbox_size = *sub_matches.get_one::<usize>("mailbox_size").unwrap();
     let dashboard = sub_matches.get_one::<String>("dashboard").unwrap().clone();
@@ -443,7 +439,7 @@ fn generate_local(sub_matches: &ArgMatches) {
         let peer_config_file = format!("{}.yaml", name);
 
         let peer_directory = Path::new(&storage_dir).join(format!("validator{}", index));
-        let peer_config = Config { 
+        let peer_config = Config {
             private_key: scheme.private_key().to_string(),
             share: hex(&shares[index].serialize()),
             identity: hex(&identity.serialize()),
@@ -451,7 +447,7 @@ fn generate_local(sub_matches: &ArgMatches) {
             port: PORT + index as u16,
             directory: peer_directory.to_string_lossy().into_owned(),
             worker_threads,
-            state_db_directory: "/home/ubuntu/alto/state".to_string(),
+            state_db_directory: format!("/home/ubuntu/alto1/state{}", index),
             metrics_port: 9090 + index as u16,
 
             allowed_peers: allowed_peers.clone(),
@@ -482,6 +478,7 @@ fn generate_local(sub_matches: &ArgMatches) {
             name: scheme.public_key().to_string(),
             region: "local".to_string(),
             ip: "127.0.0.1".parse().expect("invalid IP address"),
+            port: PORT + index as u16,
         };
         peers.push(peer);
     }
@@ -524,9 +521,9 @@ fn generate_local(sub_matches: &ArgMatches) {
 
     let peers_path = format!("{}/peers.yaml", output);
     let file = fs::File::create(peers_path).unwrap();
-    serde_yaml::to_writer(file, &ec2::Peers{peers}).unwrap();
+    serde_yaml::to_writer(file, &ec2::Peers { peers }).unwrap();
     info!(path = "peers.yaml", "wrote peers configuration file");
-    
+
     // genesis @todo this is a simple genesis implementation.
     // addr should be considered along with the values.
     let addr1 = Address::create_random_address();
@@ -539,7 +536,6 @@ fn generate_local(sub_matches: &ArgMatches) {
     serde_yaml::to_writer(file, &genesis).unwrap();
     info!(path = "genesis.yaml", "wrote genesis file");
 }
-
 
 fn indexer(sub_matches: &ArgMatches) {
     // Extract arguments

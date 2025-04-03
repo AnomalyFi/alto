@@ -946,8 +946,6 @@ dependencies = [
 [[package]]
 name = "commonware-deployer"
 version = "0.0.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e3ebb3e77e54d369d0fa78e1f5a8f3b9f9a5c6f07341367b93b9116e28475ca"
 dependencies = [
  "aws-config",
  "aws-sdk-ec2",

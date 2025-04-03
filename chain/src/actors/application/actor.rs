@@ -10,8 +10,17 @@ use alto_storage::{
     state_db::StateViewDb,
     transactional_db::{Key, Op, OpAction},
 };
-use alto_types::{account::Account, address::Address, Block, Finalization, Notarization, Seed, signed_tx::unpack_signed_txs};
+use alto_types::{
+    account::Account, address::Address, signed_tx::unpack_signed_txs, Block, Finalization,
+    Notarization, Seed,
+};
 use alto_vm::vm::VM;
+// @todo below imports are for dummy tx.
+use alto_types::{
+    tx::{Tx, TxMethods},
+    units::msg::SequencerMsg,
+    wallet::{Wallet, WalletMethods},
+};
 use commonware_codec::{Codec, WriteBuffer};
 use commonware_consensus::threshold_simplex::Prover;
 use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
@@ -27,7 +36,10 @@ use futures::{
 };
 use rand::Rng;
 use std::{
-    collections::HashMap, pin::Pin, sync::{Arc, Mutex}
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    vec,
 };
 use tracing::{info, warn};
 
@@ -187,7 +199,13 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     // fetch transactions from mempool. 
                                     // serialize the transactions fetched from mempool into a vec<u8>.
                                     // execute the transactions and get the result?
-                                    let txs = Vec::new(); // @todo get txs from mempool.
+                                    let mut txs = Vec::new(); // @todo get txs from mempool.
+                                    let mut dummy_unit = SequencerMsg::new();
+                                    dummy_unit.data = vec![0,1,2,3];
+                                    let mut dummy_tx = Tx::new(vec![Box::new(dummy_unit)], self.chain_id);
+                                    let dummy_wallet = Wallet::generate();
+                                    let dummy_signed_tx = dummy_tx.sign(dummy_wallet);
+                                    txs.push(dummy_signed_tx);
                                     // all the touched keys by the block will be added to unfinalized state.
                                     let mut executor_vm = VM::new(
                                         parent.height + 1,
@@ -208,7 +226,6 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                         let mut built = built.lock().unwrap();
                                         *built = Some(block);
                                     }
-                                    
                                     // Send the digest to the consensus
                                     let result = response.send(digest.clone());
                                     info!(view, ?digest, success=result.is_ok(), "proposed new block");
@@ -297,7 +314,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     // apply transactions.
                                     let results = executor_vm.apply(stxs.clone());
                                     // state root generation.
-                                    let dummy_state_root = [0u8;32]; //@todo 
+                                    let dummy_state_root = [0u8;32]; //@todo
                                     // verify state root equivalence.
                                     if block.state_root != dummy_state_root.into() {
                                         let _ = response.send(false);
@@ -336,30 +353,29 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                     let seed = Seed::new(view, seed.into());
 
                     // @todo syncer does the heavy lifting of post finalization processing.
-                    if let Some(at_view_touched) = self.unfinalized_state.lock().unwrap().remove(&view){
-                        if at_view_touched.is_empty(){
+                    if let Some(at_view_touched) =
+                        self.unfinalized_state.lock().unwrap().remove(&view)
+                    {
+                        if at_view_touched.is_empty() {
                             info!(view, "finalized block with no touched keys");
-                        }else{
+                        } else {
                             // lock state database.
                             let mut s_db = self.state_db.lock().unwrap();
                             // iterate over the touched keys and write to the state database.
-                            for (key, op) in at_view_touched.iter(){
+                            for (key, op) in at_view_touched.iter() {
                                 match op.action {
                                     OpAction::Update => {
                                         let _ = s_db.put(key, &op.value);
-                                    },
+                                    }
                                     OpAction::Delete => {
                                         let _ = s_db.delete(key);
-                                    },
-                                    _ =>{
-                                        /*nothing to do with the database. */
                                     }
+                                    _ => { /*nothing to do with the database. */ }
                                 }
                             }
                             info!(view, "finalized block with touched keys");
                         }
-                    }else{
-
+                    } else {
                     }
 
                     // Send the finalization to the syncer

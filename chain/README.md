@@ -26,7 +26,7 @@ cargo run --bin setup -- generate --peers 10 --bootstrappers 2 --regions us-west
 ```
 
 ```bash
-cargo run --bin setup -- generate-local --peers 5 --bootstrappers 2   --worker-threads 2 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
+cargo run --bin setup -- generate-local --peers 5 --bootstrappers 5   --worker-threads 2 --message-backlog 16384 --mailbox-size 16384 --dashboard dashboard.json --output assets
 ```
 
 ### [Optional] Configure Indexer Upload

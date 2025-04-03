@@ -201,7 +201,7 @@ impl TxMethods for Tx {
     }
 
     fn encode(&mut self) -> Vec<u8> {
-        if self.digest.is_empty() {
+        if !self.digest.is_empty() {
             return self.digest.clone();
         }
         // pack tx timestamp.
@@ -222,7 +222,7 @@ impl TxMethods for Tx {
             // pack len of inidividual unit.
             self.digest.extend((unit_bytes.len() as u64).to_be_bytes());
             // pack individual unit.
-            self.digest.extend_from_slice(&unit_bytes);
+            self.digest.extend(&unit_bytes);
         });
 
         // generate tx id.
@@ -237,7 +237,6 @@ impl TxMethods for Tx {
             return Err("Empty bytes".to_string());
         }
         let mut tx = Self::default();
-        tx.digest = bytes.to_vec(); // @todo ??
         tx.timestamp = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
         tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
@@ -248,7 +247,8 @@ impl TxMethods for Tx {
         }
         tx.units = units?;
         // generate tx id.
-        tx.id = sha256::hash(&tx.digest);
+        tx.id = sha256::hash(bytes);
+        tx.digest = bytes.to_vec();
         // return transaction.
         Ok(tx)
     }
@@ -297,7 +297,6 @@ fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
     }
 
     let unit_count = read_u64(digest, &mut offset)?;
-
     let mut units: Vec<Box<dyn Unit>> = Vec::with_capacity(unit_count as usize);
 
     for _ in 0..unit_count {
@@ -343,8 +342,6 @@ mod tests {
         let chain_id = 45205;
         let transfer = Transfer::new();
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
-        let digest: [u8; 32] = [0; 32];
-        let id = Digest::from(digest.clone());
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
         let mut origin_msg = Tx {
@@ -353,9 +350,9 @@ mod tests {
             priority_fee,
             chain_id,
             units: units.clone(),
-            id,
+            id: [0; 32].into(),
             actor: Address::empty(),
-            digest: digest.to_vec(),
+            digest: vec![],
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);

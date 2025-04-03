@@ -15,6 +15,7 @@ use alto_types::{
     signed_tx::SignedTx,
     tx::{Tx, TxMethods, TxResult, UnitContext},
 };
+use tracing::info;
 
 pub struct VM {
     pub block_number: u64,
@@ -48,6 +49,7 @@ impl VM {
     // apply assumes apply is equivalent to executing all the txs in a block.
     // and moves all the touched state by the txs into unfinalized state.
     pub fn apply(&mut self, stxs: Vec<SignedTx>) -> Vec<TxResult> {
+        info!("Applying {} txs", stxs.len());
         let unfinalized_state_for_in_mem =
             merge_maps(self.unfinalized_state.lock().unwrap().clone());
         let mut in_mem_db = InMemoryCachingTransactionalDb::new(

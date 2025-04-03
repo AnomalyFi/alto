@@ -16,9 +16,11 @@ alto-storage = { version = "0.1.0", path = "storage"}
 alto-vm = { version = "0.1.0", path = "vm"}
 commonware-consensus = { version = "0.0.40" }
 commonware-cryptography = { version = "0.0.40" }
-commonware-deployer = { version = "0.0.40" }
+# commonware-deployer = { version = "0.0.40" }
+commonware-deployer = {path ="../commonware-monorepo/deployer"}
 commonware-macros = { version = "0.0.40" }
 commonware-p2p = { version = "0.0.40" }
+# commonware-p2p = {path ="../commonware-monorepo/p2p"}
 commonware-resolver = { version = "0.0.40" }
 commonware-runtime = { version = "0.0.40" }
 commonware-storage = { version = "0.0.40" }
