@@ -1,5 +1,7 @@
 use crate::address::Address;
 use commonware_codec::{Codec, Error, Reader, Writer};
+use commonware_cryptography::ed25519::PublicKey;
+use crate::pub_key_to_address;
 
 pub type Balance = u64;
 
@@ -21,6 +23,10 @@ impl Account {
             address: Address::empty(),
             balance: 0,
         }
+    }
+
+    pub fn from_pubkey(pk: PublicKey) -> Self {
+        Self::from_address(pub_key_to_address(&pk))
     }
 
     pub fn from_address(address: Address) -> Self {

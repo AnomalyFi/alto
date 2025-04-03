@@ -3,7 +3,7 @@ use std::{
     io::copy,
 };
 
-use crate::{PublicKey, ADDRESSLEN};
+use crate::{pub_key_to_address, PublicKey, ADDRESSLEN};
 use commonware_cryptography::sha256::hash;
 use commonware_utils::hex;
 use more_asserts::assert_le;
@@ -26,10 +26,7 @@ impl Address {
     }
 
     pub fn from_pub_key(pub_key: &PublicKey) -> Self {
-        let hashed = hash(pub_key.as_ref());
-        let mut addr = Address::empty();
-        addr.0.copy_from_slice(&hashed);
-        addr
+        pub_key_to_address(pub_key)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
