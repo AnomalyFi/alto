@@ -5,7 +5,7 @@ pub mod ingress;
 mod tests {
     use core::panic;
     use std::time::Duration;
-    use alto_types::Block;
+    use alto_types::{Block};
     use axum::{
         body::Body,
         http::{Request, StatusCode}
@@ -17,14 +17,16 @@ mod tests {
     use tokio_tungstenite::{connect_async, tungstenite::{client, Message as WsClientMessage}};
     use tower::ServiceExt;
     use tracing_subscriber::{field::debug, fmt::format};
+    use alto_client::client_types::{WebsocketClientMessage};
 
-    use crate::actors::{mempool::mempool, net::ingress::WebsocketClientMessage};
+    use crate::actors::{mempool::mempool};
+    
 
     use super::{actor::Actor, ingress::Message, actor::{self}};
     use tracing::debug;
 
     #[test_traced]
-    fn test_msg() {
+    fn test_submit_tx() {
         let (runner, mut context) = Executor::init(tokio::Config::default());
         runner.start(async move {
             let (mempool_sender, mut mempool_receiver) = mpsc::channel(1024);
@@ -120,7 +122,7 @@ mod tests {
             let parent_digest = sha256::hash(&[0; 32]);
             let height = 0;
             let timestamp = 1;
-            let block = Block::new(parent_digest, height, timestamp);
+            let block = Block::new(parent_digest, height, timestamp, vec![], sha256::hash(&[0; 32]));
             mailbox.broadcast_block(block).await;
 
             context.sleep(Duration::from_millis(1000)).await;

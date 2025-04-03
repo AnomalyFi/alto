@@ -1,8 +1,7 @@
 use std::{
    collections::{HashMap, HashSet}, hash::Hash, io, ops::Deref, sync::{Arc, RwLock}
 };
-use alto_client::Client;
-use alto_types::Block;
+use alto_client::client_types::{WebsocketClientMessage};
 use axum::response::IntoResponse;
 use axum::{
     routing::get,
@@ -24,7 +23,6 @@ use tracing_subscriber::fmt::format;
 use crate::actors::mempool::mempool::{self, RawTransaction};
 
 use super::ingress::{Mailbox, Message};
-use alto_client::client_types::WebsocketClientMessage;
 #[derive(Deserialize)]
 pub struct DummyTransaction {
     #[serde(with = "serde_bytes")]

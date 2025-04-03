@@ -1,6 +1,6 @@
 use std::error::Error;
 use reqwest::{Client, Url};
-use crate::client_types::{ClientRpcMessage, ClientRpcMessageResp};
+use super::client_types::{ClientRpcMessageResp, ClientRpcMessage};
 use bytes::Bytes;
 use serde::Deserialize;
 use alto_types::tx::{Tx, TxMethods};
@@ -32,7 +32,7 @@ impl JSONRPCClient {
         }
     }
     //todo implement methods needed to communicate with server
-    pub async fn submit_tx(&self, mut tx: Tx) -> Result<ClientRpcMessageResp::SubmitTxResp, Box<dyn Error>> {
+    pub async fn submit_tx(&self, mut tx: Tx) -> Result<ClientRpcMessageResp, Box<dyn Error>> {
         let encoded_tx_bytes = tx.encode();
         let mut submit_request = ClientRpcMessage::SubmitTx {
             payload: encoded_tx_bytes.into(),
@@ -42,10 +42,11 @@ impl JSONRPCClient {
             .and_then(|base| base.join(PATH_SUBMIT_TX))
             .expect("Invalid base_url or path for submit tx");
 
-        self.send_request(full_url.to_string(), submit_request.into())
+            todo!()
+        // self.send_request(full_url.to_string(), submit_request.into()).await
     }
 
-    pub async fn get_block(&self, height: u64) -> Result<ClientRpcMessageResp::GetBlockResp, Box<dyn Error>> {
+    pub async fn get_block(&self, height: u64) -> Result<ClientRpcMessageResp, Box<dyn Error>> {
         let mut get_block_req = ClientRpcMessage::GetBlock {
             height
         };
@@ -54,17 +55,19 @@ impl JSONRPCClient {
             .and_then(|base| base.join(PATH_GET_BLOCK))
             .expect("Invalid base_url or path for get block");
 
-        self.send_request(full_url.to_string(), get_block_req.into())
+            todo!()
+        // self.send_request(full_url.to_string(), get_block_req.into()).await
     }
 
-    pub async fn get_block_height(&self) -> Result<ClientRpcMessageResp::GetBlockHeightResp, Box<dyn Error>> {
+    pub async fn get_block_height(&self) -> Result<ClientRpcMessageResp, Box<dyn Error>> {
         let mut get_block_height_req = ClientRpcMessage::GetBlockHeight {};
 
         let full_url = Url::parse(&self.base_url)
             .and_then(|base| base.join(PATH_GET_BLOCK_HEIGHT))
             .expect("Invalid base_url or path for get block");
 
-        self.send_request(full_url.to_string(), get_block_height_req.into())
+            todo!()
+        // self.send_request(full_url.to_string(), get_block_height_req.into()).await
     }
 
     async fn send_request<Resp>(&self, uri: String, data: Vec<u8>) -> Result<Resp, Box<dyn Error>> {
@@ -72,7 +75,8 @@ impl JSONRPCClient {
             .body(data)
             .send()
             .await?;
-        Ok(resp)
+        todo!()
+        // Ok(resp)
     }
 
 }

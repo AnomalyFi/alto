@@ -1,8 +1,6 @@
 use bytes::{BufMut, Bytes};
 use commonware_cryptography::sha256::Digest;
-use futures::channel::oneshot;
 use serde::{Deserialize, Serialize};
-use alto_types::Block;
 
 /// Messages sent from client
 pub enum ClientMessage {
@@ -81,7 +79,7 @@ impl WebsocketClientMessage {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
 pub enum ClientRpcMessage {
     // for rpc
     SubmitTx {
@@ -94,7 +92,23 @@ pub enum ClientRpcMessage {
     },
 }
 
-#[derive(Deserialize, Debug)]
+impl Serialize for ClientRpcMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        todo!()
+    }
+}
+
+impl<'de> Deserialize<'de> for ClientRpcMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
 pub enum ClientRpcMessageResp {
     // for rpc
     SubmitTxResp {
@@ -111,4 +125,20 @@ pub enum ClientRpcMessageResp {
         height: u64,
         err: String,
     },
+}
+
+impl Serialize for ClientRpcMessageResp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        todo!()
+    }
+}
+
+impl<'de> Deserialize<'de> for ClientRpcMessageResp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        todo!()
+    }
 }
