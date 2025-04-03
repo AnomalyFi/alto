@@ -1,38 +1,66 @@
+use std::fmt::Debug;
+use std::hash::Hash;
+
 use crate::address::Address;
-use crate::tx::{Tx, TxMethods};
+use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
 use crate::{PublicKey, Signature, TX_NAMESPACE};
-use commonware_cryptography::{Ed25519, Scheme};
+use commonware_cryptography::{Ed25519, Hasher, Scheme};
 // this is sent by the user to the validators.
-#[derive(Clone, Debug)]
-pub struct SignedTx {
-    pub tx: Tx,
+#[derive(Clone)]
+pub struct SignedTx<H: Hasher> {
+    pub tx: Tx<H>,
+
+    pub digest: H::Digest,
 
     pub_key: PublicKey,
     address: Address,
     signature: Vec<u8>,
 }
 
-// function names are self explanatory.
-pub trait SignedTxChars: Sized {
-    fn new(tx: Tx, pub_key: PublicKey, signature: Vec<u8>) -> Self;
-    // fn sign(&mut self, wallet: Wallet) -> SignedTx;
-    fn verify(&mut self) -> bool;
-    fn signature(&self) -> Vec<u8>;
-    fn public_key(&self) -> Vec<u8>;
-    fn address(&self) -> Address;
-    fn encode(&mut self) -> Vec<u8>;
-    fn decode(bytes: &[u8]) -> Result<Self, String>;
+impl<H: Hasher> Debug for SignedTx<H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    } 
 }
 
-impl SignedTxChars for SignedTx {
+
+impl<H: Hasher> SignedTx<H> {
+    pub fn payload(&self) -> Vec<u8> {
+        todo!()
+    } 
+    pub fn size(&self) -> usize {
+        todo!()
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        todo!()
+    }
+
+    pub fn validate(&self) -> bool {
+        todo!()
+    }
+
+    pub fn random() -> Self {
+        todo!()
+    }
+
+
+
     // @todo either have all fields initialized or none.
-    fn new(tx: Tx, pub_key: PublicKey, signature: Vec<u8>) -> Self {
+    fn new(tx: Tx<H>, pub_key: PublicKey, signature: Vec<u8>) -> Self {
+        let mut hasher = H::new();
+        let digest = hasher.finalize();
         Self {
             tx,
             pub_key: pub_key.clone(),
             address: Address::from_pub_key(&pub_key),
             signature: signature.clone(),
+            digest
         }
     }
 
@@ -59,7 +87,7 @@ impl SignedTxChars for SignedTx {
     }
 
     // @todo add syntactic checks.
-    fn encode(&mut self) -> Vec<u8> {
+    pub fn encode(&mut self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
         let raw_tx = self.tx.encode();
@@ -89,28 +117,37 @@ impl SignedTxChars for SignedTx {
             return Err(tx.unwrap_err());
         }
 
+        let mut hasher = H::new();
+        hasher.update(raw_tx);
+        let digest = hasher.finalize();
+
         Ok(SignedTx {
             tx: tx.unwrap(),
             pub_key: public_key.clone(),
             address: Address::from_pub_key(&public_key),
             signature: signature.to_vec(),
+            digest
         })
     }
-}
 
-impl SignedTx {
-    pub fn sign(mut tx: Tx, mut wallet: Wallet) -> SignedTx {
+    pub fn sign(mut tx: Tx<H>, mut wallet: Wallet) -> SignedTx<H> {
         let tx_data = tx.encode();
+
+        let mut hasher = H::new();
+        hasher.update(&tx_data);
+        let digest = hasher.finalize();
+
         SignedTx {
             tx: tx.clone(),
             signature: wallet.sign(&tx_data),
             address: wallet.address(),
             pub_key: wallet.public_key(),
+            digest
         }
     }
 }
 
-pub fn pack_signed_txs(signed_txs: Vec<SignedTx>) -> Vec<u8> {
+pub fn pack_signed_txs<H: Hasher>(signed_txs: Vec<SignedTx<H>>) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend((signed_txs.len() as u64).to_be_bytes());
     for signed_tx in signed_txs {
@@ -123,7 +160,7 @@ pub fn pack_signed_txs(signed_txs: Vec<SignedTx>) -> Vec<u8> {
     bytes
 }
 
-pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
+pub fn unpack_signed_txs<H: Hasher>(bytes: Vec<u8>) -> Vec<SignedTx<H>> {
     let signed_txs_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
     let mut signed_txs = Vec::with_capacity(signed_txs_len as usize);
     let mut offset = 8;
@@ -145,12 +182,14 @@ pub fn unpack_signed_txs(bytes: Vec<u8>) -> Vec<SignedTx> {
 mod tests {
     use std::default;
     use std::error::Error;
+    use std::hash::Hash;
 
     use super::*;
     use crate::tx::Unit;
     use crate::units::transfer::Transfer;
     use crate::{create_test_keypair, curr_timestamp};
-    use commonware_cryptography::sha256::Digest;
+    use commonware_cryptography::sha256::{self, Digest};
+    use commonware_cryptography::Sha256;
     use more_asserts::assert_gt;
 
     #[test]
@@ -166,7 +205,7 @@ mod tests {
         let (pk, sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
-        let tx = Tx {
+        let tx = Tx::<Sha256> {
             timestamp,
             max_fee,
             priority_fee,
@@ -176,15 +215,17 @@ mod tests {
             digest: digest.to_vec(),
             actor: Address::empty(),
         };
+        let digest = sha256::hash(&[0; 32]);
         let mut origin_msg = SignedTx {
             tx,
             pub_key: pk,
             address: Address::create_random_address(),
             signature: vec![],
+            digest
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let decoded_msg = SignedTx::decode(&encoded_bytes)?;
+        let decoded_msg = SignedTx::<Sha256>::decode(&encoded_bytes)?;
         assert_eq!(origin_msg.pub_key, decoded_msg.pub_key);
         assert_eq!(origin_msg.address, decoded_msg.address);
         assert_eq!(origin_msg.signature, decoded_msg.signature);

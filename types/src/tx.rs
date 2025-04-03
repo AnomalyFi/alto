@@ -1,6 +1,9 @@
-use commonware_cryptography::sha256;
+use commonware_cryptography::{hash, sha256, Hasher};
 use commonware_cryptography::sha256::Digest;
+use core::hash;
 use std::any::Any;
+use std::cell::OnceCell;
+use std::fmt::Debug;
 
 use crate::address::Address;
 use crate::signed_tx::SignedTx;
@@ -71,8 +74,9 @@ impl Clone for Box<dyn Unit> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Tx {
+// TODO: add a commonware_cryptography::Hasher trait for Tx, and the digest should be labeled as H::Digest
+#[derive(Clone)]
+pub struct Tx<H: Hasher> {
     /// timestamp of the tx creation. set by the user.
     /// will be verified if the tx is in the valid window once received by validators.
     /// if the timestamp is not in the valid window, the tx will be rejected.
@@ -88,61 +92,53 @@ pub struct Tx {
     /// units are fundamental unit of a tx. similar to actions.
     pub units: Vec<Box<dyn Unit>>,
 
+    // TODO: the digest and the id should be the same thing, which is the hash of the tx payload
     /// id is the transaction id. It is the hash of digest.
-    pub id: Digest,
+    pub id: H::Digest,
     /// digest is encoded tx.
     pub digest: Vec<u8>,
     /// address of the tx sender. wrap this in a better way.
     pub actor: Address,
+
+    // TODO: add a payload referenced by OnceCell here possibly to avoid repeated serialization/deserialization
 }
 
-pub trait TxMethods: Sized {
-    /// new is used to create a new instance of Tx with given units and chain id.
-    fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self;
-    /// set_fee is used to set the max fee and priority fee of the tx.
-    fn set_fee(&mut self, max_fee: u64, priority_fee: u64);
-    /// sign is used to sign the tx with the given wallet.
-    fn sign(&mut self, wallet: Wallet) -> SignedTx;
-    fn from(
-        timestamp: u64,
-        units: Vec<Box<dyn Unit>>,
-        priority_fee: u64,
-        max_fee: u64,
-        chain_id: u64,
-        actor: Address,
-    ) -> Self;
-
-    /// returns tx id.
-    fn id(&mut self) -> Digest;
-    /// returns digest of the tx.
-    fn digest(&self) -> Vec<u8>;
-    /// encodes the tx, writes to digest and returns the digest.
-    /// ensure all fields are properly set before calling this function.
-    fn encode(&mut self) -> Vec<u8>;
-
-    fn decode(bytes: &[u8]) -> Result<Self, String>;
-
-    fn set_actor(&mut self, actor: Address);
-
-    fn actor(&self) -> Address;
-}
-
-impl Default for Tx {
-    fn default() -> Self {
-        Self {
-            timestamp: 0,
-            units: vec![],
-            max_fee: 0,
-            priority_fee: 0,
-            chain_id: 19517,
-            id: [0; 32].into(),
-            digest: vec![],
-            actor: Address::empty(),
-        }
+impl<H: Hasher> Debug for Tx<H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!() 
     }
 }
 
-impl TxMethods for Tx {
+impl<H: Hasher> Tx<H> {
+    pub fn digest(&self) -> H::Digest {
+        todo!()
+    }
+
+    pub fn validate(&self) -> bool {
+        todo!()
+    } 
+
+    pub fn payload(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        todo!()
+    }
+
+    // size of the payload
+    pub fn size(&self) -> usize {
+        todo!()
+    }
+
+    pub fn random() -> Self {
+        todo!()
+    }
+
     fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self {
         let mut tx = Self::default();
         tx.timestamp = SystemTime::now().epoch_millis();
@@ -158,10 +154,12 @@ impl TxMethods for Tx {
         self.priority_fee = priority_fee;
     }
 
-    fn sign(&mut self, wallet: Wallet) -> SignedTx {
+    fn sign(&mut self, wallet: Wallet) -> SignedTx<H> {
         SignedTx::sign(self.clone(), wallet)
     }
 
+    //TODO: rename possibly as this method signature is more like a `new` for me instead of a from method
+    // the from method usually is taken by the From trait
     fn from(
         timestamp: u64,
         units: Vec<Box<dyn Unit>>,
@@ -181,18 +179,7 @@ impl TxMethods for Tx {
         tx
     }
 
-    fn id(&mut self) -> Digest {
-        if self.digest.len() == 0 {
-            self.encode();
-        }
-        self.id.clone()
-    }
-
-    fn digest(&self) -> Vec<u8> {
-        self.digest.clone()
-    }
-
-    fn encode(&mut self) -> Vec<u8> {
+    pub fn encode(&mut self) -> Vec<u8> {
         if self.digest.is_empty() {
             return self.digest.clone();
         }
@@ -217,14 +204,11 @@ impl TxMethods for Tx {
             self.digest.extend_from_slice(&unit_bytes);
         });
 
-        // generate tx id.
-        self.id = sha256::hash(&self.digest);
-
         // return encoded digest.
         self.digest.clone()
     }
 
-    fn decode(bytes: &[u8]) -> Result<Self, String> {
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         if bytes.is_empty() {
             return Err("Empty bytes".to_string());
         }
@@ -240,7 +224,9 @@ impl TxMethods for Tx {
         }
         tx.units = units?;
         // generate tx id.
-        tx.id = sha256::hash(&tx.digest);
+        let mut hasher = H::new();
+        hasher.update(&tx.digest());
+        tx.id = hasher.finalize();
         // return transaction.
         Ok(tx)
     }
@@ -251,6 +237,24 @@ impl TxMethods for Tx {
 
     fn actor(&self) -> Address {
         self.actor.clone()
+    }
+}
+
+impl<H: Hasher> Default for Tx<H> {
+    fn default() -> Self {
+        let mut hasher = H::new();
+        hasher.update(&[0; 32]);
+
+        Self {
+            timestamp: 0,
+            units: vec![],
+            max_fee: 0,
+            priority_fee: 0,
+            chain_id: 19517,
+            id: hasher.finalize(),
+            digest: vec![],
+            actor: Address::empty(),
+        }
     }
 }
 
@@ -325,6 +329,7 @@ mod tests {
     use super::*;
     use crate::curr_timestamp;
     use crate::units::transfer::Transfer;
+    use commonware_cryptography::Sha256;
     use more_asserts::assert_gt;
     use std::error::Error;
 
@@ -340,7 +345,7 @@ mod tests {
         let id = Digest::from(digest.clone());
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
-        let mut origin_msg = Tx {
+        let mut origin_msg = Tx::<Sha256> {
             timestamp,
             max_fee,
             priority_fee,
@@ -352,7 +357,7 @@ mod tests {
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let decoded_msg = Tx::decode(&encoded_bytes)?;
+        let decoded_msg = Tx::<Sha256>::decode(&encoded_bytes)?;
         let origin_transfer = origin_msg.units[0]
             .as_ref()
             .as_any()

@@ -2,6 +2,7 @@ use std::{
    collections::{HashMap, HashSet}, hash::Hash, io, ops::Deref, sync::{Arc, RwLock}
 };
 use alto_client::client_types::{WebsocketClientMessage};
+use alto_types::signed_tx::SignedTx;
 use axum::response::IntoResponse;
 use axum::{
     routing::get,
@@ -203,7 +204,6 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
                                         let state = state.write().unwrap();
                                         state.mempool.clone()
                                     };
-                                    let txs = txs.into_iter().map(|tx| mempool::RawTransaction::<H>::new(tx)).collect();
                                     let submission_res = mempool.submit_txs(txs).await;
                                     debug!(?submission_res, "txs submission result")
                                 }
@@ -240,12 +240,18 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
         let mut mempool = {
             state.read().unwrap().mempool.clone()
         };
-
-        let success = mempool.submit_txs(vec![RawTransaction::new(payload)]).await[0];
-        if success {
-            "submitted".to_string()
-        } else {
-            "failed to submit tx".to_string()
+        match SignedTx::<H>::deserialize(&payload) {
+            Ok(tx) => {
+                let success = mempool.submit_txs(vec![]).await[0];
+                if success {
+                    "submitted".to_string()
+                } else {
+                    "failed to submit tx".to_string()
+                }
+            },
+            Err(err) => {
+                format!("failed to submit tx {}", err)
+            }
         }
     }
 

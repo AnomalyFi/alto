@@ -11,6 +11,7 @@ pub mod archive;
 mod tests {
     use core::panic;
     use std::{collections::{BTreeMap, HashMap}, num::NonZeroU32, sync::{Arc, Mutex}, time::Duration};
+    use alto_types::{signed_tx::SignedTx, tx::Tx};
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
     
@@ -276,7 +277,7 @@ mod tests {
                 // issue tx to the first validator
                 let mut digests = Vec::new();
                 for i in 0..num_txs {
-                    let tx = RawTransaction::new(Bytes::from(format!("tx-{}", i)));
+                    let tx = SignedTx::random();
                     let submission_res = mailbox.submit_txs(vec![tx.clone()]).await;
                     if !submission_res[0] {
                         warn!(?tx.digest, "failed to submit tx");

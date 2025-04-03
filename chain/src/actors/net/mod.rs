@@ -95,7 +95,7 @@ mod tests {
 
             let (mut write, mut read) = ws_stream.split();
             // register block
-            let _ = write.send(WsClientMessage::binary(WebsocketClientMessage::RegisterBlock.serialize())).await;
+            let _ = write.send(WsClientMessage::binary(WebsocketClientMessage::<Sha256>::RegisterBlock.serialize())).await;
 
             // listening block
             let client_handler = context.with_label("ws_client").spawn(async move |_| {

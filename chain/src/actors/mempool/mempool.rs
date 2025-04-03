@@ -18,27 +18,28 @@ use tracing::{debug, warn, info};
 use governor::clock::Clock as GClock;
 use super::{handler::{Handler, self}, key::{self, MultiIndex, Value}, ingress, coordinator::Coordinator, archive::Wrapped};
 use crate::{actors::net, maybe_delay_between};
+use alto_types::{signed_tx::SignedTx, tx::Tx};
 
 #[derive(Clone, Debug)]
 pub struct Batch<H: Hasher>  {
     pub timestamp: SystemTime,
     // TODO: store real transactions not just raws
-    pub txs: Vec<RawTransaction<H>>,
+    pub txs: Vec<SignedTx<H>>,
     pub digest: H::Digest,
 }
 
 impl<H: Hasher> Batch<H> {
-    fn compute_digest(txs: &Vec<RawTransaction<H>>) -> H::Digest {
+    fn compute_digest(txs: &Vec<SignedTx<H>>) -> H::Digest {
         let mut hasher = H::new();
 
         for tx in txs.iter() {
-            hasher.update(&tx.raw);
+            hasher.update(&tx.payload());
         }
 
         hasher.finalize()
     }
 
-    pub fn new(txs: Vec<RawTransaction<H>>, timestamp: SystemTime) -> Self {
+    pub fn new(txs: Vec<SignedTx<H>>, timestamp: SystemTime) -> Self {
         let digest = Self::compute_digest(&txs);
 
         Self {
@@ -53,17 +54,17 @@ impl<H: Hasher> Batch<H> {
         bytes.put_u64(self.timestamp.epoch_millis());
         bytes.put_u64(self.txs.len() as u64);
         for tx in self.txs.iter() {
-            bytes.put_u64(tx.size());
-            bytes.extend_from_slice(&tx.raw);
+            bytes.put_u64(tx.size() as u64);
+            bytes.extend_from_slice(&tx.payload());
         }
         bytes
     }
 
-    pub fn deserialize(mut bytes: &[u8]) -> Option<Self> {
+    pub fn deserialize(mut bytes: &[u8]) -> Result<Self, String> {
         use bytes::Buf;
         // We expect at least 18 bytes for the header
         if bytes.remaining() < 18 {
-            return None;
+            return Err(format!("not enough bytes for header"));
         }
         let timestamp = bytes.get_u64();
         let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(timestamp);
@@ -73,22 +74,22 @@ impl<H: Hasher> Batch<H> {
         for _ in 0..tx_count {
             // For each transaction, first read the size (u64).
             if bytes.remaining() < 8 {
-                return None;
+                return Err(format!("not enough bytes for tx size"));
             }
             let tx_size = bytes.get_u64() as usize;
             // Ensure there are enough bytes left.
             if bytes.remaining() < tx_size {
-                return None;
+                return Err(format!("not enough bytes for tx payload, needed: {}, actual: {}", tx_size, bytes.remaining()));
             }
             // Extract tx_size bytes.
             let tx_bytes = bytes.copy_to_bytes(tx_size);
-            txs.push(RawTransaction::new(tx_bytes));
+            txs.push(SignedTx::deserialize(&tx_bytes)?);
         }
         // Compute the digest from the transactions.
         let digest = Self::compute_digest(&txs);
         // Since serialize did not include accepted and timestamp, we set accepted to false
         // and set timestamp to the current time.
-        Some(Self {
+        Ok(Self {
             timestamp,
             txs,
             digest,
@@ -96,11 +97,13 @@ impl<H: Hasher> Batch<H> {
     }
 
     pub fn contain_tx(&self, digest: &H::Digest) -> bool {
-        self.txs.iter().any(|tx| &tx.digest == digest) 
+        todo!()
+        // self.txs.iter().any(|tx| &tx.digest == digest) 
     }
 
     pub fn tx(&self, digest: &H::Digest) -> Option<RawTransaction<H>> {
-        self.txs.iter().find(|tx| &tx.digest == digest).cloned()
+        // self.txs.iter().find(|tx| &tx.digest == digest).cloned()
+        todo!()
     }
 }
 
@@ -151,7 +154,7 @@ pub enum Message<H: Hasher> {
     },
     // from rpc or websocket
     SubmitTxs {
-        payload: Vec<RawTransaction<H>>,
+        payload: Vec<SignedTx<H>>,
         response: oneshot::Sender<Vec<bool>>
     },
     BatchConsumed {
@@ -199,7 +202,7 @@ impl<H: Hasher> Mailbox<H> {
         receiver.await.expect("failed to receive batch acknowledge")
     }
 
-    pub async fn submit_txs(&mut self, payload: Vec<RawTransaction<H>>) -> Vec<bool> {
+    pub async fn submit_txs(&mut self, payload: Vec<SignedTx<H>>) -> Vec<bool> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::SubmitTxs { payload, response })
@@ -288,7 +291,7 @@ pub struct Mempool<
     accepted: Archive<TwoCap, H::Digest, B, R>,
     consumed: Archive<TwoCap, H::Digest, B, R>,
 
-    txs: Vec<RawTransaction<H>>,
+    txs: Vec<SignedTx<H>>,
 
     mailbox: mpsc::Receiver<Message<H>>,
     mailbox_size: usize,
@@ -438,6 +441,8 @@ impl<
                     };
                     match message {
                         Message::SubmitTxs { payload, response } => {
+                            // TODO: add timestamp verification here
+
                             let mut result = Vec::with_capacity(payload.len());
                             for tx in payload.into_iter() {
                                 if !tx.validate() {
@@ -557,7 +562,7 @@ impl<
                     let mut size = 0;
                     let mut txs_cnt = 0;
                     for tx in self.txs.iter() {
-                        size += tx.size();
+                        size += tx.size() as u64;
                         txs_cnt += 1;
 
                         if size > self.batch_size_limit {
@@ -585,7 +590,7 @@ impl<
                 },
                 batch_message = batch_network.1.recv() => {
                     let (sender, message) = batch_message.expect("Batch broadcast closed");
-                    let Some(batch) = Batch::deserialize(&message) else {
+                    let Ok(batch) = Batch::deserialize(&message) else {
                         warn!(?sender, "failed to deserialize batch");
                         continue;
                     };

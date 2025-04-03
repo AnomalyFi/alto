@@ -43,23 +43,6 @@ impl Message {
     }
 }
 
-#[derive(Debug)]
-pub enum RpcMessage {
-    // for rpc
-    SubmitTx {
-        payload: Bytes,
-        response: oneshot::Sender<Digest>
-    },
-    GetBlockHeight {
-        response: oneshot::Sender<u64>
-    },
-    GetBlock {
-        height: u64,
-        response: oneshot::Sender<Option<Block>>,
-    },
-}
-
-
 #[derive(Clone)]
 pub struct Mailbox {
     sender: mpsc::Sender<Message>

@@ -1,9 +1,10 @@
 use std::error::Error;
+use commonware_cryptography::Sha256;
 use reqwest::{Client, Url};
 use super::client_types::{ClientRpcMessageResp, ClientRpcMessage};
 use bytes::Bytes;
 use serde::Deserialize;
-use alto_types::tx::{Tx, TxMethods};
+use alto_types::tx::{Tx};
 pub const WEBSOCKET_PREFIX:  &'static str = "/ws";
 pub const RPC_PREFIX: &'static str = "/api";
 // TODO: Update the below endpoints when we know what they are
@@ -32,7 +33,7 @@ impl JSONRPCClient {
         }
     }
     //todo implement methods needed to communicate with server
-    pub async fn submit_tx(&self, mut tx: Tx) -> Result<ClientRpcMessageResp, Box<dyn Error>> {
+    pub async fn submit_tx(&self, mut tx: Tx<Sha256>) -> Result<ClientRpcMessageResp, Box<dyn Error>> {
         let encoded_tx_bytes = tx.encode();
         let mut submit_request = ClientRpcMessage::SubmitTx {
             payload: encoded_tx_bytes.into(),

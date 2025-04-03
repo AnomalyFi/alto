@@ -1,4 +1,4 @@
-use crate::signed_tx::{pack_signed_txs, unpack_signed_txs, SignedTx, SignedTxChars};
+use crate::signed_tx::{pack_signed_txs, unpack_signed_txs, SignedTx};
 use crate::{Finalization, Notarization};
 use bytes::{Buf, BufMut};
 use commonware_cryptography::{bls12381::PublicKey, sha256, sha256::Digest, Hasher, Sha256};
@@ -23,7 +23,7 @@ pub struct Block {
     /// The state root of the block.
     pub state_root: Digest,
 
-    txs: Vec<SignedTx>,
+    txs: Vec<SignedTx<Sha256>>,
     /// Pre-computed digest of the block.
     digest: Digest,
 }
@@ -49,7 +49,7 @@ impl Block {
         parent: Digest,
         height: u64,
         timestamp: u64,
-        txs: Vec<SignedTx>,
+        txs: Vec<SignedTx<Sha256>>,
         state_root: Digest,
     ) -> Self {
         // let mut txs = txs;
