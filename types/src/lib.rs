@@ -21,6 +21,7 @@ pub mod wallet;
 pub mod wasm;
 
 use rand::rngs::OsRng;
+use crate::address::Address;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
@@ -49,8 +50,21 @@ pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
     (public_key, private_key)
 }
 
+pub fn empty_pub_key() -> PublicKey {
+    PublicKey::try_from(&[0; 33]).unwrap()
+}
+
 pub fn curr_timestamp() -> u64 {
     SystemTime::now().epoch_millis()
+}
+
+pub fn empty_signature() -> Signature {
+    Signature::try_from("").unwrap()
+}
+
+pub fn random_signature() -> Signature {
+    let addr = Address::create_random_address();
+    Signature::try_from(addr).unwrap()
 }
 
 #[cfg(test)]

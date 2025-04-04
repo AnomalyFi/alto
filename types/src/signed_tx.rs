@@ -4,10 +4,13 @@ use commonware_codec::Codec;
 use crate::address::Address;
 use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
-use crate::{PublicKey, Signature, TX_NAMESPACE};
-use commonware_cryptography::{Ed25519, Hasher, Scheme};
-use std::cell::{Cell, OnceCell, RefCell};
-use std::iter::Once;
+use crate::{create_test_keypair, curr_timestamp, PublicKey, Signature, TX_NAMESPACE};
+use commonware_cryptography::{Ed25519, Hasher, Scheme, Sha256};
+use std::cell::OnceCell;
+use rand::rngs::OsRng;
+use crate::units::msg::SequencerMsg;
+use crate::units::transfer::Transfer;
+use crate::units::Unit;
 
 // this is sent by the user to the validators.
 #[derive(Clone)]
@@ -15,9 +18,8 @@ pub struct SignedTx<H: Hasher> {
     pub tx: Tx<H>,
 
     pub digest: H::Digest,
-
     pub_key: PublicKey,
-    signature: Vec<u8>,
+    signature: Signature,
     // cached is encode of SignedTx
     // todo use OnceCell since payload encode is set once or use RefCell for mutable access?
     cached_payload: OnceCell<Vec<u8>>,
@@ -48,7 +50,7 @@ impl<H: Hasher> SignedTx<H> {
         self.payload().len()
     }
 
-    pub fn serialize(&mut self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         self.payload()
     }
 
@@ -57,11 +59,24 @@ impl<H: Hasher> SignedTx<H> {
     }
 
     pub fn validate(&self) -> bool {
-        todo!()
+        let tx_data = self.tx.encode();
+        let signature = self.signature.clone();
+        if signature.is_empty() {
+            return false;
+        }
+        let sender_pk = self.pub_key.clone();
+        Ed25519::verify(Some(TX_NAMESPACE), &tx_data, &sender_pk, &signature)
     }
 
-    pub fn random() -> Self {
-        todo!()
+    pub fn random(&self) -> Self {
+        // create a tx
+        let tx = Tx::random();
+       // generate keypair for sk usage
+        let (_, sk) = create_test_keypair();
+        // create wallet
+        let wallet = Wallet::load(sk.as_ref());
+        // sign tx to create a signed tx
+        Self::sign(tx, wallet)
     }
 
     fn new(tx: Tx<H>, pub_key: PublicKey, signature: Vec<u8>) -> Self {
@@ -70,28 +85,27 @@ impl<H: Hasher> SignedTx<H> {
         Self {
             tx,
             pub_key: pub_key.clone(),
-            signature: signature.clone(),
+            signature: Signature::try_from(signature.clone()).unwrap(),
             cached_payload: OnceCell::new(),
             digest
         }
     }
 
-    fn verify(&mut self) -> bool {
+    fn verify(&self) -> bool {
         let tx_data = self.tx.encode();
-        let signature = Signature::try_from(self.signature.as_slice());
-        if signature.is_err() {
+        let signature = self.signature.clone();
+        if signature.is_empty() {
             return false;
         }
-        let signature = signature.unwrap();
         Ed25519::verify(Some(TX_NAMESPACE), &tx_data, &self.pub_key, &signature)
     }
 
-    fn signature(&self) -> Vec<u8> {
+    fn signature(&self) -> Signature {
         self.signature.clone()
     }
 
-    fn public_key(&self) -> Vec<u8> {
-        self.pub_key.to_vec()
+    fn public_key(&self) -> PublicKey {
+        self.pub_key.clone()
     }
 
     // @todo add syntactic checks.
@@ -132,7 +146,7 @@ impl<H: Hasher> SignedTx<H> {
         Ok(SignedTx {
             tx: tx?,
             pub_key: public_key.clone(),
-            signature: signature.to_vec(),
+            signature: Signature::try_from(signature.to_vec()).unwrap(),
             digest,
             cached_payload: OnceCell::new(),
         })
@@ -147,7 +161,7 @@ impl<H: Hasher> SignedTx<H> {
 
         SignedTx {
             tx: tx.clone(),
-            signature: wallet.sign(&tx_data),
+            signature: Signature::try_from(wallet.sign(&tx_data)).unwrap(),
             pub_key: wallet.public_key(),
             digest,
             cached_payload: OnceCell::new(),
@@ -195,7 +209,7 @@ mod tests {
     use super::*;
     use crate::units::transfer::Transfer;
     use crate::units::Unit;
-    use crate::{create_test_keypair, curr_timestamp};
+    use crate::{create_test_keypair, curr_timestamp, random_signature};
     use commonware_cryptography::sha256::{self, Digest};
     use commonware_cryptography::Sha256;
     use more_asserts::assert_gt;
@@ -210,6 +224,7 @@ mod tests {
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
         let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
+        let sig = random_signature();
         let (pk, sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
@@ -225,7 +240,7 @@ mod tests {
         let mut origin_msg = SignedTx {
             tx,
             pub_key: pk,
-            signature: vec![],
+            signature: sig.clone(),
             digest,
             cached_payload: OnceCell::new(),
         };

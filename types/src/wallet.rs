@@ -40,7 +40,7 @@ pub trait WalletMethods {
     // create a new wallet using the given randomness.
     fn generate<R: CryptoRng + Rng>(r: &mut R) -> Self;
     // load signer from bytes rep of a private key and initialize the wallet.
-    fn load(&self, priv_key: &[u8]) -> Self;
+    fn load(priv_key: &[u8]) -> Self;
     // sign the given arbitary data with the private key of the wallet.
     fn sign(&mut self, data: &[u8]) -> Vec<u8>;
     // verify the signature of the given data with the public key of the wallet.
@@ -71,7 +71,7 @@ impl WalletMethods for Wallet {
         }
     }
 
-    fn load(&self, priv_key: &[u8]) -> Self {
+    fn load(priv_key: &[u8]) -> Self {
         let private_key = PrivateKey::try_from(priv_key).expect("Invalid private key");
         let signer = <Ed25519 as Scheme>::from(private_key).unwrap();
         Self {

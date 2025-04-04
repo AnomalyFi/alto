@@ -1,7 +1,6 @@
 use bytes::{Buf, BufMut};
-use commonware_cryptography::{hash, sha256, Hasher};
+use commonware_cryptography::{hash, sha256, Hasher, Scheme};
 use commonware_cryptography::sha256::Digest;
-use core::hash;
 use std::any::Any;
 use std::cell::OnceCell;
 use std::error::Error;
@@ -15,6 +14,10 @@ use crate::units::{self, decode_units, encode_units, transfer, Unit, UnitType};
 use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
 use std::time::SystemTime;
+use commonware_cryptography::ed25519::PublicKey;
+use crate::curr_timestamp;
+use crate::units::msg::SequencerMsg;
+use crate::units::transfer::Transfer;
 
 // TODO: add a commonware_cryptography::Hasher trait for Tx, and the digest should be labeled as H::Digest
 #[derive(Clone)]
@@ -34,13 +37,13 @@ pub struct Tx<H: Hasher> {
     /// units are fundamental unit of a tx. similar to actions.
     pub units: Vec<Box<dyn Unit>>,
 
-    // TODO: the digest and the id should be the same thing, which is the hash of the tx payload
-    /// id is the transaction id. It is the hash of digest.
+    // TODO: the payload and the id should be the same thing, which is the hash of the tx payload
+    /// id is the transaction id. It is the hash of payload.
     pub id: H::Digest,
-    /// digest is encoded tx.
-    payload: OnceCell<Vec<u8>>,
-    /// address of the tx sender. wrap this in a better way.
-    pub actor: Address,
+    /// payload is encoded tx.
+    pub payload: OnceCell<Vec<u8>>,
+    /// address of the tx sender.
+    pub sender: Address,
 
     // TODO: add a payload referenced by OnceCell here possibly to avoid repeated serialization/deserialization
 }
@@ -55,7 +58,8 @@ impl<H: Hasher> Debug for Tx<H> {
             .field("chain_id", &self.chain_id)
             .field("units", &self.units)
             .field("id", &self.id)
-            .field("actor", &self.actor)
+            .field("payload", &self.payload)
+            .field("sender", &self.sender)
             .finish()
     }
 }
@@ -78,7 +82,7 @@ impl<H: Hasher> Tx<H> {
 
     pub fn validate(&self) -> bool {
         todo!()
-    } 
+    }
 
     pub fn payload(&self) -> Vec<u8> {
         self.encode()
@@ -98,7 +102,23 @@ impl<H: Hasher> Tx<H> {
     }
 
     pub fn random() -> Self {
-        todo!()
+        // create a tx
+        let timestamp = curr_timestamp();
+        let max_fee = 100;
+        let priority_fee = 75;
+        let chain_id = 45205;
+        let transfer = Transfer::new(Address::empty(), 100, vec![34,10,43]);
+        let msg = SequencerMsg::new(10, Address::empty(), vec![1, 2, 3]);
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer), Box::new(msg)];
+
+        Tx::new(
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            Address::empty(),
+            units.clone(),
+        )
     }
 
     pub fn new(
@@ -106,7 +126,7 @@ impl<H: Hasher> Tx<H> {
         max_fee: u64,
         priority_fee: u64,
         chain_id: u64,
-        actor: Address,
+        sender: Address,
         units: Vec<Box<dyn Unit>>,
     ) -> Self {
         let mut hasher = H::new();
@@ -119,7 +139,7 @@ impl<H: Hasher> Tx<H> {
             priority_fee,
             chain_id,
             units,
-            actor,
+            sender,
             payload: OnceCell::new(),
         };
         tx.id = tx.compute_digest();
@@ -142,7 +162,7 @@ impl<H: Hasher> Tx<H> {
         priority_fee: u64,
         max_fee: u64,
         chain_id: u64,
-        actor: Address,
+        sender: Address,
     ) -> Self {
         let mut tx = Self::default();
         tx.timestamp = timestamp;
@@ -150,7 +170,7 @@ impl<H: Hasher> Tx<H> {
         tx.max_fee = max_fee;
         tx.priority_fee = priority_fee;
         tx.chain_id = chain_id;
-        tx.actor = actor;
+        tx.sender = sender;
         tx.encode();
         tx
     }
@@ -200,12 +220,12 @@ impl<H: Hasher> Tx<H> {
         Ok(tx)
     }
 
-    fn set_actor(&mut self, actor: Address) {
-        self.actor = actor;
+    fn set_sender(&mut self, sender: Address) {
+        self.sender = sender;
     }
 
-    fn actor(&self) -> Address {
-        self.actor.clone()
+    fn sender(&self) -> Address {
+        self.sender.clone()
     }
 }
 
@@ -222,7 +242,7 @@ impl<H: Hasher> Default for Tx<H> {
             chain_id: 19517,
             id: hasher.finalize(),
             payload: OnceCell::new(),
-            actor: Address::empty(),
+            sender: Address::empty(),
         }
     }
 }
@@ -259,7 +279,6 @@ mod tests {
         );
         let encoded_bytes = tx.encode();
         print!("encoded tx length: {}\n", encoded_bytes.len());
-
         let decoded_msg = Tx::<Sha256>::decode(&encoded_bytes)?;
 
         assert_eq!(decoded_msg.payload().len(), encoded_bytes.len());
