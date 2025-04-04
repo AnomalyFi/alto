@@ -193,8 +193,8 @@ mod tests {
     use std::hash::Hash;
 
     use super::*;
-    use crate::tx::Unit;
     use crate::units::transfer::Transfer;
+    use crate::units::Unit;
     use crate::{create_test_keypair, curr_timestamp};
     use commonware_cryptography::sha256::{self, Digest};
     use commonware_cryptography::Sha256;
@@ -206,23 +206,21 @@ mod tests {
         let max_fee = 100;
         let priority_fee = 75;
         let chain_id = 45205;
-        let transfer = Transfer::new();
+        let transfer = Transfer::default();
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
         let digest: [u8; 32] = [0; 32];
         let id = Digest::from(digest.clone());
         let (pk, sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
-        let tx = Tx::<Sha256> {
+        let tx = Tx::<Sha256>::new(
             timestamp,
             max_fee,
             priority_fee,
             chain_id,
-            units: units.clone(),
-            id,
-            digest: OnceCell::from(digest.to_vec()),
-            actor: Address::empty(),
-        };
+            Address::empty(),
+            units,
+        );
         let digest = sha256::hash(&[0; 32]);
         let mut origin_msg = SignedTx {
             tx,

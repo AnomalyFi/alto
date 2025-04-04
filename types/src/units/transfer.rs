@@ -1,24 +1,51 @@
-use crate::address::Address;
+use bytes::{Buf, BufMut};
+
+use crate::{address::Address, ADDRESSLEN};
 use crate::state_view::StateView;
-use crate::tx::{Unit, UnitContext, UnitType};
+use std::ops::Add;
 use std::{any::Any, error::Error, fmt::Display};
+
+use super::{Unit, UnitContext, UnitType};
 
 const MAX_MEMO_SIZE: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct Transfer {
-    pub to_address: Address,
+    pub to: Address,
     pub value: u64,
     pub memo: Vec<u8>,
 }
 
 impl Transfer {
-    pub fn new() -> Transfer {
+    pub fn new(to: Address, value: u64, memo: Vec<u8>) -> Transfer {
         Self {
-            to_address: Address::empty(),
-            value: 0,
-            memo: Vec::new(),
+            to,
+            value,
+            memo,
         }
+    }
+
+    pub fn decode(mut bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        //  Value + MemoLen + AddressLen + <Memo>
+        let expected_size = size_of::<u64>() * 2 + size_of::<Address>();
+        if bytes.len() < expected_size {
+            return Err("Not enough data to decode sequencer message".into());
+        }
+
+        let to = Address::from_bytes(&bytes.copy_to_bytes(ADDRESSLEN))?;
+        let value = bytes.get_u64();
+        let memo_len  = bytes.get_u64() as usize;
+        if bytes.remaining() != memo_len {
+            return Err(format!("Incorrect memo length, wanted: {}, actual: {}", memo_len, bytes.remaining()).into());
+        }
+        let memo = bytes.copy_to_bytes(memo_len).to_vec();
+        Ok( Self { to, value, memo })
+    }
+
+    // @todo introduce syntactic checks.
+    pub fn decode_box(mut bytes: &[u8]) -> Result<Box<dyn Unit>, Box<dyn Error>> {
+        let transfer = Self::decode(bytes)?;
+        Ok(Box::new(transfer))
     }
 }
 
@@ -50,33 +77,12 @@ impl Unit for Transfer {
 
     fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        let memo_len = self.memo.len() as u64;
-        bytes.extend_from_slice(self.to_address.as_slice());
+
+        bytes.extend_from_slice(self.to.as_slice());
         bytes.extend(self.value.to_be_bytes());
-        bytes.extend(memo_len.to_be_bytes());
-        if memo_len > 0 {
-            bytes.extend_from_slice(&self.memo);
-        }
-
+        bytes.put_u64(self.memo.len() as u64);
+        bytes.extend_from_slice(&self.memo);
         bytes
-    }
-
-    // @todo introduce syntactic checks.
-    fn decode(&mut self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
-        let expected_size = size_of::<u64>() * 2 + size_of::<Address>();
-        if expected_size < bytes.len() {
-            return Err("Not enough data to decode sequencer message".into());
-        }
-        self.to_address = Address::from_bytes(&bytes[0..32])?;
-        self.value = u64::from_be_bytes(bytes[32..40].try_into()?);
-        let memo_len :usize = u64::from_be_bytes(bytes[40..48].try_into()?) as usize;
-        if (expected_size + memo_len) != bytes.len() {
-            return Err("Incorrect sequencer message length".into());
-        }
-        if memo_len > 0 {
-            self.memo = bytes[48..(48 + memo_len as usize)].to_vec();
-        }
-        Ok(())
     }
 
     fn apply(
@@ -92,10 +98,10 @@ impl Unit for Transfer {
             if bal < self.value {
                 return Err(TransferError::InsufficientFunds.into());
             }
-            let receiver_bal = state.get_balance(&self.to_address).unwrap_or(0);
+            let receiver_bal = state.get_balance(&self.to).unwrap_or(0);
 
             if !state.set_balance(&context.sender, bal - self.value)
-                || !state.set_balance(&self.to_address, receiver_bal + self.value)
+                || !state.set_balance(&self.to, receiver_bal + self.value)
             {
                 return Err(TransferError::StorageError.into());
             }
@@ -114,7 +120,7 @@ impl Unit for Transfer {
 impl Default for Transfer {
     fn default() -> Self {
         Self {
-            to_address: Address::empty(),
+            to: Address::empty(),
             value: 0,
             memo: vec![],
         }
@@ -129,19 +135,18 @@ mod tests {
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
-        let to_address = Address::create_random_address();
+        let to = Address::create_random_address();
         let value = 5;
         let memo = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let origin_msg = Transfer {
-            to_address,
+            to,
             value,
             memo,
         };
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
-        let mut decoded_msg = Transfer::new();
-        decoded_msg.decode(&encoded_bytes);
-        assert_eq!(origin_msg.to_address, decoded_msg.to_address);
+        let decoded_msg = Transfer::decode(&encoded_bytes)?;
+        assert_eq!(origin_msg.to, decoded_msg.to);
         assert_eq!(origin_msg.value, decoded_msg.value);
         assert_eq!(origin_msg.memo, decoded_msg.memo);
         Ok(())

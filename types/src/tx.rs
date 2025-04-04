@@ -1,78 +1,20 @@
+use bytes::{Buf, BufMut};
 use commonware_cryptography::{hash, sha256, Hasher};
 use commonware_cryptography::sha256::Digest;
 use core::hash;
 use std::any::Any;
 use std::cell::OnceCell;
+use std::error::Error;
 use std::fmt::Debug;
+use std::ops::Add;
 
 use crate::address::Address;
 use crate::signed_tx::SignedTx;
 use crate::state_view::StateView;
-use crate::units;
+use crate::units::{self, decode_units, encode_units, transfer, Unit, UnitType};
 use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
 use std::time::SystemTime;
-
-#[derive(Debug)]
-pub enum UnitType {
-    Transfer,
-    SequencerMsg,
-}
-
-impl TryFrom<u8> for UnitType {
-    type Error = String;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(UnitType::Transfer),
-            1 => Ok(UnitType::SequencerMsg),
-            _ => Err(format!("unknown unit type: {}", value)),
-        }
-    }
-}
-
-pub struct UnitContext {
-    // timestamp of the tx.
-    pub timestamp: u64,
-    // chain id of the tx.
-    pub chain_id: u64,
-    // sender of the tx.
-    pub sender: Address,
-}
-
-pub trait UnitClone {
-    fn clone_box(&self) -> Box<dyn Unit>;
-}
-
-impl<T> UnitClone for T
-where
-    T: 'static + Unit + Clone,
-{
-    fn clone_box(&self) -> Box<dyn Unit> {
-        Box::new(self.clone())
-    }
-}
-
-// unit need to be simple and easy to be packed in the tx and executed by the vm.
-pub trait Unit: UnitClone + Send + Sync + std::fmt::Debug {
-    fn unit_type(&self) -> UnitType;
-    fn encode(&self) -> Vec<u8>;
-    fn decode(&mut self, bytes: &[u8]);
-
-    fn apply(
-        &self,
-        context: &UnitContext,
-        state: &mut Box<&mut dyn StateView>,
-    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>>;
-
-    fn as_any(&self) -> &dyn Any;
-}
-
-impl Clone for Box<dyn Unit> {
-    fn clone(&self) -> Box<dyn Unit> {
-        self.clone_box()
-    }
-}
 
 // TODO: add a commonware_cryptography::Hasher trait for Tx, and the digest should be labeled as H::Digest
 #[derive(Clone)]
@@ -96,7 +38,7 @@ pub struct Tx<H: Hasher> {
     /// id is the transaction id. It is the hash of digest.
     pub id: H::Digest,
     /// digest is encoded tx.
-    pub digest: OnceCell<Vec<u8>>,
+    payload: OnceCell<Vec<u8>>,
     /// address of the tx sender. wrap this in a better way.
     pub actor: Address,
 
@@ -113,26 +55,36 @@ impl<H: Hasher> Debug for Tx<H> {
             .field("chain_id", &self.chain_id)
             .field("units", &self.units)
             .field("id", &self.id)
-            .field("digest", &self.digest)
             .field("actor", &self.actor)
             .finish()
     }
 }
 
 impl<H: Hasher> Tx<H> {
+    fn compute_digest(&self) -> H::Digest {
+        if self.payload.get().is_none() {
+            let _ = self.serialize();
+        }
+
+        let payload = self.payload.get().expect("payload nil");
+        let mut hasher = H::new();
+        hasher.update(&payload);
+        hasher.finalize()
+    }
+
     pub fn digest(&mut self) -> H::Digest {
-        self.encode()
+        self.id
     }
 
     pub fn validate(&self) -> bool {
         todo!()
     } 
 
-    pub fn payload(&mut self) -> Vec<u8> {
+    pub fn payload(&self) -> Vec<u8> {
         self.encode()
     }
 
-    pub fn serialize(&mut self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         self.encode()
     }
 
@@ -149,13 +101,29 @@ impl<H: Hasher> Tx<H> {
         todo!()
     }
 
-    fn new(units: Vec<Box<dyn Unit>>, chain_id: u64) -> Self {
-        let mut tx = Self::default();
-        tx.timestamp = SystemTime::now().epoch_millis();
-        tx.units = units;
-        tx.chain_id = chain_id;
+    pub fn new(
+        timestamp: u64,
+        max_fee: u64,
+        priority_fee: u64,
+        chain_id: u64,
+        actor: Address,
+        units: Vec<Box<dyn Unit>>,
+    ) -> Self {
+        let mut hasher = H::new();
+        hasher.update(&[0; 32]);
 
-        // do not encode and generate tx_id as Tx::new doesnot yet have priority fee and max fee.
+        let mut tx = Self {
+            id: hasher.finalize(),
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            units,
+            actor,
+            payload: OnceCell::new(),
+        };
+        tx.id = tx.compute_digest();
+
         tx
     }
 
@@ -188,55 +156,47 @@ impl<H: Hasher> Tx<H> {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        if self.digest.get().is_some() {
-            return self.digest.get().unwrap().to_vec();
+        if let Some(payload) = self.payload.get() {
+            // TODO: use ref counter instead of copying?
+            return payload.to_vec();
         }
-        let mut digest: Vec<u8> = Vec::new();
+        let mut payload: Vec<u8> = Vec::new();
         // pack tx timestamp.
-        digest.extend(self.timestamp.to_be_bytes());
+        payload.put_u64(self.timestamp);
         // pack max fee
-        digest.extend(self.max_fee.to_be_bytes());
+        payload.put_u64(self.max_fee);
         // pack priority fee
-        digest.extend(self.priority_fee.to_be_bytes());
+        payload.put_u64(self.priority_fee);
         // pack chain id
-        digest.extend(self.chain_id.to_be_bytes());
+        payload.put_u64(self.chain_id);
         // pack # of units.
-        digest.extend((self.units.len() as u64).to_be_bytes());
-        // pack individual units
-        self.units.iter().for_each(|unit| {
-            let unit_bytes = unit.encode();
-            // pack the unit type info.
-            digest.extend((unit.unit_type() as u8).to_be_bytes());
-            // pack len of individual unit.
-            digest.extend((unit_bytes.len() as u64).to_be_bytes());
-            // pack individual unit.
-            digest.extend_from_slice(&unit_bytes);
-        });
-        self.digest.set(digest).expect("cannot set digest");
-        // return encoded digest.
-        self.digest.get().unwrap().to_vec()
+        let units_raw = encode_units(&self.units);
+        payload.extend_from_slice(&units_raw);
+
+        // cache the payload
+        self.payload.set(payload).expect("cannot set payload");
+        self.payload.get().expect("unable to get payload").to_vec()
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+    pub fn decode(mut bytes: &[u8]) -> Result<Self, String> {
         if bytes.is_empty() {
-            return Err("Empty bytes".to_string());
+            return Err("Empty bytes".into());
         }
+        // Store the payload the compute digest
         let mut tx = Self::default();
-        tx.digest = OnceCell::from(bytes.to_vec()); // @todo ??
-        tx.timestamp = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-        tx.max_fee = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
-        tx.priority_fee = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
-        tx.chain_id = u64::from_be_bytes(bytes[24..32].try_into().unwrap());
-        let units = unpack_units(&bytes[32..]);
-        if units.is_err() {
-            return Err(format!("Failed to unpack units: {}", units.unwrap_err()));
-        }
-        tx.units = units?;
-        // generate tx id.
-        let mut hasher = H::new();
-        hasher.update(&tx.digest());
-        tx.id = hasher.finalize();
-        // return transaction.
+        tx.payload = OnceCell::from(bytes.to_vec());
+        let digest = tx.compute_digest();
+        tx.id = digest;
+
+
+        tx.timestamp = bytes.get_u64();
+        tx.max_fee = bytes.get_u64();
+        tx.priority_fee = bytes.get_u64();
+        tx.chain_id = bytes.get_u64();
+
+        let units = decode_units(bytes).unwrap().into();
+        tx.units = units;
+
         Ok(tx)
     }
 
@@ -261,85 +221,22 @@ impl<H: Hasher> Default for Tx<H> {
             priority_fee: 0,
             chain_id: 19517,
             id: hasher.finalize(),
-            digest: OnceCell::new(),
+            payload: OnceCell::new(),
             actor: Address::empty(),
         }
     }
-}
-
-fn unpack_units(digest: &[u8]) -> Result<Vec<Box<dyn Unit>>, String> {
-    let mut offset = 0;
-
-    fn read_u8(input: &[u8], offset: &mut usize) -> Result<u8, String> {
-        if input.len() < *offset + 1 {
-            return Err("Unexpected end of input when reading u8".into());
-        }
-        let val = input[*offset];
-        *offset += 1;
-        Ok(val)
-    }
-
-    fn read_u64(input: &[u8], offset: &mut usize) -> Result<u64, String> {
-        if input.len() < *offset + 8 {
-            return Err("Unexpected end of input when reading u64".into());
-        }
-        let val = u64::from_be_bytes(input[*offset..*offset + 8].try_into().unwrap());
-        *offset += 8;
-        Ok(val)
-    }
-
-    fn read_bytes<'a>(
-        input: &'a [u8],
-        offset: &'a mut usize,
-        len: usize,
-    ) -> Result<&'a [u8], String> {
-        if input.len() < *offset + len {
-            return Err("Unexpected end of input when reading bytes".into());
-        }
-        let bytes = &input[*offset..*offset + len];
-        *offset += len;
-        Ok(bytes)
-    }
-
-    let unit_count = read_u64(digest, &mut offset)?;
-
-    let mut units: Vec<Box<dyn Unit>> = Vec::with_capacity(unit_count as usize);
-
-    for _ in 0..unit_count {
-        let unit_type = read_u8(digest, &mut offset)?;
-        let unit_len = read_u64(digest, &mut offset)?;
-        let unit_bytes = read_bytes(digest, &mut offset, unit_len as usize)?.to_vec();
-        let unit_type = UnitType::try_from(unit_type);
-        if unit_type.is_err() {
-            return Err(format!("Invalid unit type: {}", unit_type.unwrap_err()));
-        }
-        let unit_type = unit_type?;
-        let unit: Box<dyn Unit> = match unit_type {
-            UnitType::Transfer => {
-                let mut transfer = units::transfer::Transfer::default();
-                transfer.decode(&unit_bytes);
-                Box::new(transfer)
-            }
-            UnitType::SequencerMsg => {
-                let mut msg = units::msg::SequencerMsg::default();
-                msg.decode(&unit_bytes);
-                Box::new(msg)
-            }
-        };
-        units.push(unit);
-    }
-
-    Ok(units)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::curr_timestamp;
+    use crate::units::msg::SequencerMsg;
     use crate::units::transfer::Transfer;
     use commonware_cryptography::Sha256;
     use more_asserts::assert_gt;
     use std::error::Error;
+    use std::vec;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
@@ -347,26 +244,27 @@ mod tests {
         let max_fee = 100;
         let priority_fee = 75;
         let chain_id = 45205;
-        let transfer = Transfer::new();
-        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
-        let digest: [u8; 32] = [0; 32];
-        let id = Digest::from(digest.clone());
+        let transfer = Transfer::new(Address::empty(), 100, vec![34,10,43]);
+        let msg = SequencerMsg::new(10, Address::empty(), vec![1, 2, 3]);
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer), Box::new(msg)];
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
-        let mut origin_msg = Tx::<Sha256> {
+        let mut tx = Tx::<Sha256>::new(
             timestamp,
             max_fee,
             priority_fee,
             chain_id,
-            units: units.clone(),
-            id,
-            actor: Address::empty(),
-            digest: OnceCell::from(digest.to_vec()),
-        };
-        let encoded_bytes = origin_msg.encode();
-        assert_gt!(encoded_bytes.len(), 0);
+            Address::empty(),
+            units.clone(),
+        );
+        let encoded_bytes = tx.encode();
+        print!("encoded tx length: {}\n", encoded_bytes.len());
+
         let decoded_msg = Tx::<Sha256>::decode(&encoded_bytes)?;
-        let origin_transfer = origin_msg.units[0]
+
+        assert_eq!(decoded_msg.payload().len(), encoded_bytes.len());
+
+        let origin_transfer = tx.units[0]
             .as_ref()
             .as_any()
             .downcast_ref::<Transfer>()
@@ -378,15 +276,15 @@ mod tests {
             .downcast_ref::<Transfer>()
             .expect("Failed to downcast to Transfer");
 
-        assert_eq!(origin_msg.timestamp, decoded_msg.timestamp);
-        assert_eq!(origin_msg.max_fee, decoded_msg.max_fee);
-        assert_eq!(origin_msg.priority_fee, decoded_msg.priority_fee);
-        assert_eq!(origin_msg.chain_id, decoded_msg.chain_id);
-        assert_eq!(origin_msg.id, decoded_msg.id);
-        assert_eq!(origin_msg.digest, decoded_msg.digest);
+        assert_eq!(tx.timestamp, decoded_msg.timestamp);
+        assert_eq!(tx.max_fee, decoded_msg.max_fee);
+        assert_eq!(tx.priority_fee, decoded_msg.priority_fee);
+        assert_eq!(tx.chain_id, decoded_msg.chain_id);
+        assert_eq!(tx.id, decoded_msg.id);
+        assert_eq!(tx.payload, decoded_msg.payload);
 
         // units
-        assert_eq!(origin_transfer.to_address, decode_transfer.to_address);
+        assert_eq!(origin_transfer.to, decode_transfer.to);
         assert_eq!(origin_transfer.value, decode_transfer.value);
         assert_eq!(origin_transfer.memo, decode_transfer.memo);
         Ok(())
