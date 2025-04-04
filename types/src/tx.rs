@@ -37,13 +37,10 @@ pub struct Tx<H: Hasher> {
     /// units are fundamental unit of a tx. similar to actions.
     pub units: Vec<Box<dyn Unit>>,
 
-    // TODO: the payload and the id should be the same thing, which is the hash of the tx payload
     /// id is the transaction id. It is the hash of payload.
     pub id: H::Digest,
     /// payload is encoded tx.
     pub payload: OnceCell<Vec<u8>>,
-    /// address of the tx sender.
-    pub sender: Address,
 
     // TODO: add a payload referenced by OnceCell here possibly to avoid repeated serialization/deserialization
 }
@@ -59,7 +56,6 @@ impl<H: Hasher> Debug for Tx<H> {
             .field("units", &self.units)
             .field("id", &self.id)
             .field("payload", &self.payload)
-            .field("sender", &self.sender)
             .finish()
     }
 }
@@ -139,7 +135,6 @@ impl<H: Hasher> Tx<H> {
             priority_fee,
             chain_id,
             units,
-            sender,
             payload: OnceCell::new(),
         };
         tx.id = tx.compute_digest();
@@ -170,7 +165,6 @@ impl<H: Hasher> Tx<H> {
         tx.max_fee = max_fee;
         tx.priority_fee = priority_fee;
         tx.chain_id = chain_id;
-        tx.sender = sender;
         tx.encode();
         tx
     }
@@ -219,14 +213,6 @@ impl<H: Hasher> Tx<H> {
 
         Ok(tx)
     }
-
-    fn set_sender(&mut self, sender: Address) {
-        self.sender = sender;
-    }
-
-    fn sender(&self) -> Address {
-        self.sender.clone()
-    }
 }
 
 impl<H: Hasher> Default for Tx<H> {
@@ -242,7 +228,6 @@ impl<H: Hasher> Default for Tx<H> {
             chain_id: 19517,
             id: hasher.finalize(),
             payload: OnceCell::new(),
-            sender: Address::empty(),
         }
     }
 }
