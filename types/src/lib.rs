@@ -71,6 +71,7 @@ pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
 mod tests {
     use super::*;
     use commonware_cryptography::{hash, Bls12381, Scheme};
+    use commonware_utils::SizedSerialize;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -259,5 +260,35 @@ mod tests {
         // Check finalization serialization with no public key
         let result = Finalization::deserialize(None, &serialized);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_block_residue() {
+        // Create network key
+        let mut rng = StdRng::seed_from_u64(0);
+        // Create block
+        let parent_digest = hash(&[0; 32]);
+        let height = 0;
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
+        let mut payload = block.serialize();
+        payload.push(10);
+
+        let block_recover = Block::deserialize(&payload);
+        assert!(block_recover.is_none());
+    }
+
+    #[test]
+    fn test_block_below_serialize_len() {
+        // Create block
+        let parent_digest = hash(&[0; 32]);
+        let height = 0;
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
+        let mut payload = block.serialize();
+        payload.push(10);
+
+        let block_recover = Block::deserialize(&payload[0..Block::SERIALIZED_LEN-1]);
+        assert!(block_recover.is_none());
     }
 }

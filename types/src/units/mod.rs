@@ -55,11 +55,22 @@ pub fn decode_units<T: Buf>(mut raw: T) -> Result<Vec<Box<dyn Unit>>, Box<dyn Er
     let num_units = raw.get_u64();
     let mut units = Vec::with_capacity(num_units as usize);
     for _ in 0..num_units {
+        if raw.remaining() < size_of::<u8>() + size_of::<u64>() {
+            return Err(format!("remaining bytes invalid to form a unit header: {}", raw.remaining()).into())
+        }
+
         let unit_type = raw.get_u8();
         let raw_len = raw.get_u64();
+        if raw.remaining() < raw_len as usize {
+            return Err(format!("remaining bytes invalid to decode a unit, wanted: {}, actual: {}", raw_len, raw.remaining()).into())
+        }
         let unit_raw = raw.copy_to_bytes(raw_len as usize);
         let unit = decode_unit(unit_type.try_into()?, &unit_raw)?;
         units.push(unit);
+    }
+
+    if raw.remaining() != 0 {
+            return Err(format!("left residue after decoding all the units: {} ", raw.remaining()).into())
     }
 
     Ok(units)
@@ -127,6 +138,8 @@ impl Clone for Box<dyn Unit> {
 
 #[cfg(test)]
 mod tests {
+    use commonware_utils::SizedSerialize;
+
     use crate::address::Address;
 
     use super::{decode_units, encode_units, msg::SequencerMsg, transfer::Transfer, Unit};
@@ -145,5 +158,61 @@ mod tests {
         let decoded_untis = decode_units(units_raw.as_slice()).unwrap();
 
         assert_eq!(units.len(), decoded_untis.len())
+    }
+
+    #[test]
+    fn test_insufficient_bytes() {
+        let mut units: Vec<Box<dyn Unit>> = Vec::new();
+
+        let transfer = Transfer::new(Address::empty(), 100, vec![0, 1, 2, 3]);
+        let msg = SequencerMsg::new(0, Address::empty(), vec![3, 4, 5, 6]);
+
+        units.push(Box::new(transfer));
+        units.push(Box::new(msg));
+
+        let mut units_raw = encode_units(&units);
+
+        let decode_result = decode_units(&units_raw[0..units_raw.len() - 10]);
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        assert!(err_str.contains("remaining bytes invalid to decode a unit"));
+    }
+
+
+    #[test]
+    fn test_excessive_bytes() {
+        let mut units: Vec<Box<dyn Unit>> = Vec::new();
+
+        let transfer = Transfer::new(Address::empty(), 100, vec![0, 1, 2, 3]);
+        let msg = SequencerMsg::new(0, Address::empty(), vec![3, 4, 5, 6]);
+
+        units.push(Box::new(transfer));
+        units.push(Box::new(msg));
+
+        let mut units_raw = encode_units(&units);
+        units_raw.append(&mut [0 as u8; 32].to_vec());
+
+        let decode_result = decode_units(units_raw.as_slice());
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        assert!(err_str.contains("left residue after decoding all the units"));
+    }
+
+    #[test]
+    fn test_unit_header_truncated() {
+        let mut units: Vec<Box<dyn Unit>> = Vec::new();
+
+        let transfer = Transfer::new(Address::empty(), 100, vec![0, 1, 2, 3]);
+        let msg = SequencerMsg::new(0, Address::empty(), vec![3, 4, 5, 6]);
+
+        units.push(Box::new(transfer));
+        units.push(Box::new(msg));
+
+        let units_raw = encode_units(&units);
+        let decode_result = decode_units(&units_raw[0..units_raw.len()-Transfer::SERIALIZED_LEN-5]);
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        print!("{}\n", err_str);
+        assert!(err_str.contains("remaining bytes invalid to form a unit header"));
     }
 }

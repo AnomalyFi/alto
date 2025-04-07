@@ -19,7 +19,6 @@ use rand::Rng;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{debug, event, Level, error};
-use tracing_subscriber::fmt::format;
 
 use crate::actors::mempool::mempool;
 

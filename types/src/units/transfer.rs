@@ -1,4 +1,5 @@
 use bytes::{Buf, BufMut};
+use commonware_utils::SizedSerialize;
 
 use crate::{address::Address, ADDRESSLEN};
 use crate::state_view::StateView;
@@ -16,6 +17,10 @@ pub struct Transfer {
     pub memo: Vec<u8>,
 }
 
+impl SizedSerialize for Transfer {
+    const SERIALIZED_LEN: usize = ADDRESSLEN + size_of::<u64>() * 2;
+}
+
 impl Transfer {
     pub fn new(to: Address, value: u64, memo: Vec<u8>) -> Transfer {
         Self {
@@ -27,9 +32,8 @@ impl Transfer {
 
     pub fn decode(mut bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
         //  Value + MemoLen + AddressLen + <Memo>
-        let expected_size = size_of::<u64>() * 2 + size_of::<Address>();
-        if bytes.len() < expected_size {
-            return Err("Not enough data to decode sequencer message".into());
+        if bytes.len() < Self::SERIALIZED_LEN {
+            return Err("Not enough data to decode transfer".into());
         }
 
         let to = Address::from_bytes(&bytes.copy_to_bytes(ADDRESSLEN))?;

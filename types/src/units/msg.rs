@@ -1,4 +1,5 @@
 use bytes::{Buf, BufMut};
+use commonware_utils::SizedSerialize;
 
 use crate::{
     address::Address,
@@ -18,6 +19,10 @@ pub struct SequencerMsg {
     pub data: Vec<u8>,
 }
 
+impl SizedSerialize for SequencerMsg {
+    const SERIALIZED_LEN: usize = ADDRESSLEN + size_of::<u64>() * 2;
+}
+
 impl SequencerMsg {
     pub fn new(chain_id: u64, from: Address, data: Vec<u8>) -> SequencerMsg {
         Self {
@@ -30,9 +35,8 @@ impl SequencerMsg {
     // @todo introduce syntactic checks.
     pub fn decode(mut bytes: &[u8]) -> Result<SequencerMsg, Box<dyn Error>> {
         // ChainID + DataLen + AddressLen + <Data>
-        let expected_size = size_of::<u64>()*2 + size_of::<Address>();
-        if bytes.len() < expected_size {
-            return Err(format!("Not enough data to decode sequencer message, wanted: >{}, actual: {}", expected_size, bytes.len()).into());
+        if bytes.len() < Self::SERIALIZED_LEN {
+            return Err(format!("Not enough data to decode sequencer message, wanted: >{}, actual: {}", Self::SERIALIZED_LEN, bytes.len()).into());
         }
 
         let chain_id = bytes.get_u64();

@@ -1,7 +1,10 @@
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::ops::Deref;
 use std::sync::OnceLock;
+use bytes::{Buf, BufMut};
 use commonware_codec::Codec;
+use commonware_utils::SizedSerialize;
 use crate::address::Address;
 use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
@@ -16,14 +19,19 @@ use crate::units::Unit;
 // this is sent by the user to the validators.
 #[derive(Clone)]
 pub struct SignedTx<H: Hasher> {
+    pub_key: PublicKey,
+    signature: Signature,
     pub tx: Tx<H>,
 
     pub digest: H::Digest,
-    pub_key: PublicKey,
-    signature: Signature,
     // cached is encode of SignedTx
     // todo use OnceCell since payload encode is set once or use RefCell for mutable access?
     cached_payload: OnceLock<Vec<u8>>,
+}
+
+impl<H: Hasher> SizedSerialize for SignedTx<H> {
+    //  Pubkey + Sig + TxLen + Sizeof(Tx)
+    const SERIALIZED_LEN: usize = PublicKey::SERIALIZED_LEN + Signature::SERIALIZED_LEN + size_of::<u64>(); 
 }
 
 impl<H: Hasher> Debug for SignedTx<H> {
@@ -40,6 +48,10 @@ impl<H: Hasher> Debug for SignedTx<H> {
 
 
 impl<H: Hasher> SignedTx<H> {
+    pub fn digest(&self) -> H::Digest {
+        self.digest
+    }
+
     pub fn payload(&self) -> Vec<u8> {
         if self.cached_payload.get().is_none() {
             self.cached_payload.set(self.encode()).expect("could not set cache payload");
@@ -113,44 +125,44 @@ impl<H: Hasher> SignedTx<H> {
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
-        let raw_tx = self.tx.encode();
-        let raw_tx_len = raw_tx.len() as u64;
-        bytes.extend(raw_tx_len.to_be_bytes());
-        bytes.extend_from_slice(&raw_tx);
         bytes.extend_from_slice(&self.pub_key);
         bytes.extend_from_slice(&self.signature);
+
+        let raw_tx = self.tx.payload();
+        bytes.put_u64(raw_tx.len() as u64);
+        bytes.extend_from_slice(&raw_tx);
         bytes
     }
 
     // @todo add syntactic checks and use methods consume.
-    fn decode(bytes: &[u8]) -> Result<Self, String> {
-        // @todo this method seems untidy.
-        // TODO: size check
+    fn decode(mut bytes: &[u8]) -> Result<Self, String> {
+        let payload = bytes.to_vec();
 
-        let raw_tx_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
-        let raw_tx = &bytes[8..8 + raw_tx_len as usize];
-        let pub_key = &bytes[8 + raw_tx_len as usize..8 + raw_tx_len as usize + 32];
-        let signature = &bytes[8 + raw_tx_len as usize + 32..];
-        let public_key = PublicKey::try_from(pub_key);
-        if public_key.is_err() {
-            return Err(public_key.unwrap_err().to_string());
+        if bytes.len() < Self::SERIALIZED_LEN {
+            return Err(format!("bytes len: {} below min size: {}", bytes.len(), Self::SERIALIZED_LEN))
         }
-        let public_key = public_key.unwrap();
-        let tx = Tx::decode(raw_tx);
-        if tx.is_err() {
-            return Err(tx.unwrap_err());
+
+        let pub_key = PublicKey::try_from(bytes.copy_to_bytes(PublicKey::SERIALIZED_LEN).deref()).map_err(|e| stringify!(e))?;
+        let signature = Signature::try_from(bytes.copy_to_bytes(Signature::SERIALIZED_LEN).deref()).map_err(|e| stringify!(e))?;
+
+        let raw_tx_len = bytes.get_u64();
+        if bytes.remaining() != raw_tx_len as usize {
+            return Err(format!("remaining bytes length not equal to tx len, wanted: {}, actual: {}", raw_tx_len, bytes.remaining()))
         }
+
+        let raw_tx = bytes.copy_to_bytes(raw_tx_len as usize);
+        let tx = Tx::decode(&raw_tx)?;
 
         let mut hasher = H::new();
-        hasher.update(raw_tx);
+        hasher.update(&raw_tx);
         let digest = hasher.finalize();
 
         Ok(SignedTx {
-            tx: tx?,
-            pub_key: public_key.clone(),
-            signature: Signature::try_from(signature.to_vec()).unwrap(),
+            tx,
+            pub_key, 
+            signature,
             digest,
-            cached_payload: OnceLock::new(),
+            cached_payload: OnceLock::from(payload),
         })
     }
 
@@ -245,5 +257,94 @@ mod tests {
         assert_eq!(origin_msg.signature, decoded_msg.signature);
         // @todo make helper to compare fields in tx and units. same issue when testing in tx.rs file.
         Ok(())
+    }
+
+    #[test]
+    fn test_insufficient_bytes() {
+        let timestamp = SystemTime::now().epoch_millis();
+        let max_fee = 100;
+        let priority_fee = 75;
+        let chain_id = 45205;
+        let transfer = Transfer::default();
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let (_, sk) = create_test_keypair();
+        // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
+        // shouldn't encode be able to encode without changing the msg?
+        let tx = Tx::<Sha256>::new(
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            Address::empty(),
+            units,
+        );
+        let origin_msg = SignedTx::sign(tx, Wallet::load(&sk));
+        let encoded_bytes = origin_msg.encode();
+        assert_gt!(encoded_bytes.len(), 0);
+        let decode_result = SignedTx::<Sha256>::decode(&encoded_bytes[0..encoded_bytes.len()-10]);
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        print!("{}\n", err_str);
+        assert!(err_str.contains("remaining bytes length not equal to tx len"));
+    }
+
+    #[test]
+    fn test_below_serialize_len() {
+        let timestamp = SystemTime::now().epoch_millis();
+        let max_fee = 100;
+        let priority_fee = 75;
+        let chain_id = 45205;
+        let transfer = Transfer::default();
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let (_, sk) = create_test_keypair();
+        // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
+        // shouldn't encode be able to encode without changing the msg?
+        let tx = Tx::<Sha256>::new(
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            Address::empty(),
+            units,
+        );
+        let origin_msg = SignedTx::sign(tx, Wallet::load(&sk));
+        let encoded_bytes = origin_msg.encode();
+        assert_gt!(encoded_bytes.len(), 0);
+        let decode_result = SignedTx::<Sha256>::decode(&encoded_bytes[0..SignedTx::<Sha256>::SERIALIZED_LEN-1]);
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        print!("{}\n", err_str);
+        assert!(err_str.contains("below min size"));
+    }
+
+    #[test]
+    fn test_residue() {
+        let timestamp = SystemTime::now().epoch_millis();
+        let max_fee = 100;
+        let priority_fee = 75;
+        let chain_id = 45205;
+        let transfer = Transfer::default();
+        let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
+        let (_, sk) = create_test_keypair();
+        // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
+        // shouldn't encode be able to encode without changing the msg?
+        let tx = Tx::<Sha256>::new(
+            timestamp,
+            max_fee,
+            priority_fee,
+            chain_id,
+            Address::empty(),
+            units,
+        );
+        let origin_msg = SignedTx::sign(tx, Wallet::load(&sk));
+        let mut encoded_bytes = origin_msg.encode();
+        encoded_bytes.push(10);
+
+        assert_gt!(encoded_bytes.len(), 0);
+        let decode_result = SignedTx::<Sha256>::decode(&encoded_bytes);
+
+        let err_str = decode_result.map_err(|e| e.to_string()).err().unwrap();
+        print!("{}\n", err_str);
+        assert!(err_str.contains("remaining bytes length not equal to tx len"));
     }
 }

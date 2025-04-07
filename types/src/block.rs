@@ -30,6 +30,12 @@ pub struct Block {
     digest: Sha256Digest,
 }
 
+impl SizedSerialize for Block {
+    // parent + height + timestamp + state_root + len(batches)
+    const SERIALIZED_LEN: usize = 
+        Sha256Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN + Sha256Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN;
+}
+
 impl Block {
     fn compute_digest(
         parent: &Sha256Digest,
@@ -87,9 +93,9 @@ impl Block {
 
     pub fn deserialize(mut bytes: &[u8]) -> Option<Self> {
         // Parse the block
-        // if bytes.len() != Self::SERIALIZED_LEN {
-        //     return None;
-        // }
+        if bytes.len() < Self::SERIALIZED_LEN {
+            return None;
+        }
         let parent = Sha256Digest::read_from(&mut bytes).ok()?;
         let height = bytes.get_u64();
         let timestamp = bytes.get_u64();
@@ -97,8 +103,15 @@ impl Block {
         let num_batches = bytes.get_u64();
         let mut batch_digests = Vec::with_capacity(num_batches as usize);
         for _ in 0..num_batches {
+            if bytes.remaining() < Sha256Digest::SERIALIZED_LEN {
+                return None;
+            }
             let batch_digest = Sha256Digest::read_from(&mut bytes).ok()?;
             batch_digests.push(batch_digest);
+        }
+
+        if bytes.remaining() != 0 {
+            return None;
         }
 
         let digest = Self::compute_digest(&parent, height, timestamp, &batch_digests, &state_root);
@@ -118,13 +131,6 @@ impl Block {
     pub fn digest(&self) -> Sha256Digest {
         self.digest.clone()
     }
-}
-
-// TODO: this should be an estimate of the size of one block since batches size can be variable
-impl SizedSerialize for Block {
-    // there is an assumed factor `5` multiply by Sha256Digest::SERIALIZED_LEN, which is an estimate how average many batches will be included in one block
-    const SERIALIZED_LEN: usize =
-        Sha256Digest::SERIALIZED_LEN + u64::SERIALIZED_LEN + u64::SERIALIZED_LEN + Sha256Digest::SERIALIZED_LEN + 5 * Sha256Digest::SERIALIZED_LEN;
 }
 
 pub struct Notarized {
