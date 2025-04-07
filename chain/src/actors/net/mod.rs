@@ -8,7 +8,7 @@ pub mod ingress;
 mod tests {
     use core::panic;
     use std::time::Duration;
-    use alto_types::{Block};
+    use alto_types::{signed_tx::SignedTx, Block};
     use axum::{
         body::Body,
         http::{Request, StatusCode}
@@ -30,11 +30,11 @@ mod tests {
 
     #[test_traced]
     fn test_submit_tx() {
-        let (runner, mut context) = Executor::init(tokio::Config::default());
+        let (runner, context) = Executor::init(tokio::Config::default());
         runner.start(async move {
             let (mempool_sender, mut mempool_receiver) = mpsc::channel(1024);
             let mempool_mailbox: mempool::Mailbox<Sha256> = mempool::Mailbox::new(mempool_sender);
-            let (actor, mailbox) = Actor::new(context.with_label("router"), actor::Config {
+            let (actor, _) = Actor::new(context.with_label("router"), actor::Config {
                 port: 7890,
                 mempool: mempool_mailbox
             });
@@ -60,7 +60,8 @@ mod tests {
             // Note: the handler expects a payload (a String). Since GET requests normally have no body,
             // you might decide to pass the payload as a query parameter or in the body if that's what you intend.
             // Here, we'll assume the payload is extracted from the request body.
-            let payload = "test-tx";
+            let tx = SignedTx::<Sha256>::random();
+            let payload = tx.payload();
             let request = Request::builder()
                 .method("GET")
                 .uri("/mempool/submit")
@@ -87,10 +88,10 @@ mod tests {
                 mempool: mempool_mailbox
             });
 
-            debug!("starting router");
-            let app_handler = actor.start().await;
+            println!("starting router");
+            let app_handler = actor.start();
 
-            debug!("launching ws client");
+            println!("launching ws client");
             // instantiate websocket client listening block
             let url = format!("ws://127.0.0.1:7890/ws");
             let (ws_stream, response) = connect_async(url).await.expect("Failed to connect");
@@ -108,7 +109,7 @@ mod tests {
                             let msg = Message::deserialize(&bin).unwrap();
                             match msg {
                                 Message::PublishBlock { block } => {
-                                    print!("received a block from server: {:?}", block);
+                                    println!("received a block from server: {:?}", block);
                                     return;
                                 }
                             }
@@ -121,7 +122,7 @@ mod tests {
             });
 
             // send a dummy block
-            debug!("mock sending dummy block from another service");
+            println!("mock sending dummy block from another service");
             let parent_digest = sha256::hash(&[0; 32]);
             let height = 0;
             let timestamp = 1;

@@ -6,6 +6,7 @@ use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Add;
+use std::sync::OnceLock;
 
 use crate::address::Address;
 use crate::signed_tx::SignedTx;
@@ -15,7 +16,6 @@ use crate::wallet::Wallet;
 use commonware_utils::SystemTimeExt;
 use std::time::SystemTime;
 use commonware_cryptography::ed25519::PublicKey;
-use crate::curr_timestamp;
 use crate::units::msg::SequencerMsg;
 use crate::units::transfer::Transfer;
 
@@ -40,7 +40,7 @@ pub struct Tx<H: Hasher> {
     /// id is the transaction id. It is the hash of payload.
     pub id: H::Digest,
     /// payload is encoded tx.
-    pub payload: OnceCell<Vec<u8>>,
+    pub payload: OnceLock<Vec<u8>>,
 
     // TODO: add a payload referenced by OnceCell here possibly to avoid repeated serialization/deserialization
 }
@@ -99,7 +99,7 @@ impl<H: Hasher> Tx<H> {
 
     pub fn random() -> Self {
         // create a tx
-        let timestamp = curr_timestamp();
+        let timestamp = SystemTime::now().epoch_millis();
         let max_fee = 100;
         let priority_fee = 75;
         let chain_id = 45205;
@@ -135,7 +135,7 @@ impl<H: Hasher> Tx<H> {
             priority_fee,
             chain_id,
             units,
-            payload: OnceCell::new(),
+            payload: OnceLock::new(),
         };
         tx.id = tx.compute_digest();
 
@@ -198,7 +198,7 @@ impl<H: Hasher> Tx<H> {
         }
         // Store the payload the compute digest
         let mut tx = Self::default();
-        tx.payload = OnceCell::from(bytes.to_vec());
+        tx.payload = OnceLock::from(bytes.to_vec());
         let digest = tx.compute_digest();
         tx.id = digest;
 
@@ -227,7 +227,7 @@ impl<H: Hasher> Default for Tx<H> {
             priority_fee: 0,
             chain_id: 19517,
             id: hasher.finalize(),
-            payload: OnceCell::new(),
+            payload: OnceLock::new(),
         }
     }
 }
@@ -235,7 +235,6 @@ impl<H: Hasher> Default for Tx<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::curr_timestamp;
     use crate::units::msg::SequencerMsg;
     use crate::units::transfer::Transfer;
     use commonware_cryptography::Sha256;
@@ -245,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
-        let timestamp = curr_timestamp();
+        let timestamp = SystemTime::now().epoch_millis();
         let max_fee = 100;
         let priority_fee = 75;
         let chain_id = 45205;

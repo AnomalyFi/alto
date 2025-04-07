@@ -127,7 +127,7 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
 
     /// handles messages from other services within a node such as block messages 
     async fn handle_message(state: SharedState<R, H>, msg: Message) {
-        println!("handling msg {:?}", msg);
+        debug!("handling msg {:?}", msg);
         let block_listeners = state.read().unwrap().block_listeners.clone();
         let clients = state.read().unwrap().clients.clone();
 
@@ -242,7 +242,7 @@ impl<R: Rng + Spawner + Metrics + Clock, H: Hasher> Actor<R, H> {
         };
         match SignedTx::<H>::deserialize(&payload) {
             Ok(tx) => {
-                let success = mempool.submit_txs(vec![]).await[0];
+                let success = mempool.submit_txs(vec![tx]).await[0];
                 if success {
                     "submitted".to_string()
                 } else {

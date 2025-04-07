@@ -1,10 +1,11 @@
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::sync::OnceLock;
 use commonware_codec::Codec;
 use crate::address::Address;
 use crate::tx::{Tx};
 use crate::wallet::{Wallet, WalletMethods};
-use crate::{create_test_keypair, curr_timestamp, PublicKey, Signature, TX_NAMESPACE};
+use crate::{create_test_keypair, PublicKey, Signature, TX_NAMESPACE};
 use commonware_cryptography::{Ed25519, Hasher, Scheme, Sha256};
 use std::cell::OnceCell;
 use rand::rngs::OsRng;
@@ -22,7 +23,7 @@ pub struct SignedTx<H: Hasher> {
     signature: Signature,
     // cached is encode of SignedTx
     // todo use OnceCell since payload encode is set once or use RefCell for mutable access?
-    cached_payload: OnceCell<Vec<u8>>,
+    cached_payload: OnceLock<Vec<u8>>,
 }
 
 impl<H: Hasher> Debug for SignedTx<H> {
@@ -68,7 +69,7 @@ impl<H: Hasher> SignedTx<H> {
         Ed25519::verify(Some(TX_NAMESPACE), &tx_data, &sender_pk, &signature)
     }
 
-    pub fn random(&self) -> Self {
+    pub fn random() -> Self {
         // create a tx
         let tx = Tx::random();
        // generate keypair for sk usage
@@ -86,7 +87,7 @@ impl<H: Hasher> SignedTx<H> {
             tx,
             pub_key: pub_key.clone(),
             signature: Signature::try_from(signature.clone()).unwrap(),
-            cached_payload: OnceCell::new(),
+            cached_payload: OnceLock::new(),
             digest
         }
     }
@@ -124,6 +125,7 @@ impl<H: Hasher> SignedTx<H> {
     // @todo add syntactic checks and use methods consume.
     fn decode(bytes: &[u8]) -> Result<Self, String> {
         // @todo this method seems untidy.
+        // TODO: size check
 
         let raw_tx_len = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         let raw_tx = &bytes[8..8 + raw_tx_len as usize];
@@ -148,7 +150,7 @@ impl<H: Hasher> SignedTx<H> {
             pub_key: public_key.clone(),
             signature: Signature::try_from(signature.to_vec()).unwrap(),
             digest,
-            cached_payload: OnceCell::new(),
+            cached_payload: OnceLock::new(),
         })
     }
 
@@ -164,7 +166,7 @@ impl<H: Hasher> SignedTx<H> {
             signature: Signature::try_from(wallet.sign(&tx_data)).unwrap(),
             pub_key: wallet.public_key(),
             digest,
-            cached_payload: OnceCell::new(),
+            cached_payload: OnceLock::new(),
         }
     }
 }
@@ -205,27 +207,26 @@ mod tests {
     use std::default;
     use std::error::Error;
     use std::hash::Hash;
+    use std::time::SystemTime;
 
     use super::*;
     use crate::units::transfer::Transfer;
     use crate::units::Unit;
-    use crate::{create_test_keypair, curr_timestamp, random_signature};
+    use crate::{create_test_keypair};
     use commonware_cryptography::sha256::{self, Digest};
     use commonware_cryptography::Sha256;
+    use commonware_utils::SystemTimeExt;
     use more_asserts::assert_gt;
 
     #[test]
     fn test_encode_decode() -> Result<(), Box<dyn Error>> {
-        let timestamp = curr_timestamp();
+        let timestamp = SystemTime::now().epoch_millis();
         let max_fee = 100;
         let priority_fee = 75;
         let chain_id = 45205;
         let transfer = Transfer::default();
         let units: Vec<Box<dyn Unit>> = vec![Box::new(transfer)];
-        let digest: [u8; 32] = [0; 32];
-        let id = Digest::from(digest.clone());
-        let sig = random_signature();
-        let (pk, sk) = create_test_keypair();
+        let (_, sk) = create_test_keypair();
         // TODO: the .encode call on next line gave error and said origin_msg needed to be mut? but why?
         // shouldn't encode be able to encode without changing the msg?
         let tx = Tx::<Sha256>::new(
@@ -236,14 +237,7 @@ mod tests {
             Address::empty(),
             units,
         );
-        let digest = sha256::hash(&[0; 32]);
-        let mut origin_msg = SignedTx {
-            tx,
-            pub_key: pk,
-            signature: sig.clone(),
-            digest,
-            cached_payload: OnceCell::new(),
-        };
+        let origin_msg = SignedTx::sign(tx, Wallet::load(&sk));
         let encoded_bytes = origin_msg.encode();
         assert_gt!(encoded_bytes.len(), 0);
         let decoded_msg = SignedTx::<Sha256>::decode(&encoded_bytes)?;
