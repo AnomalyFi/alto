@@ -83,20 +83,23 @@ pub struct Config {
 
 #[cfg(test)]
 mod tests {
+    use crate::actors::{mempool::mempool, net};
+
     use super::*;
     use alto_types::{Finalized, Notarized, Seed};
     use bls12381::primitives::poly;
-    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme};
+    use commonware_cryptography::{bls12381::dkg::ops, ed25519::PublicKey, Ed25519, Scheme, Sha256};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{self, Link, Network, Oracle, Receiver, Sender};
     use commonware_runtime::{
-        deterministic::{self, Executor},
+        deterministic::{self, Context, Executor},
         Clock, Metrics, Runner, Spawner,
     };
     use commonware_utils::quorum;
     use engine::{Config, Engine};
     use governor::Quota;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use futures::{channel::mpsc, StreamExt};
     use std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
@@ -183,6 +186,23 @@ mod tests {
             );
         }
         registrations
+    }
+
+    async fn spawn_net(
+        context: Context,
+    ) -> net::Mailbox {
+        let (net_sender, mut net_receiver) = mpsc::channel(1024);
+        context.with_label("mock_net").spawn(async move |_| {
+            while let Some(msg) = net_receiver.next().await {
+                match msg {
+                    net::Message::PublishBlock { block } => {
+                        info!(?block, "received block from syncer")
+                    }
+                }
+            }
+        });
+
+        net::Mailbox::new(net_sender)
     }
 
     /// Links (or unlinks) validators using the oracle.
@@ -296,8 +316,11 @@ mod tests {
                 let (voter, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Spawn mock net actor
+                let net = spawn_net(context.with_label("net")).await;
+
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(voter, resolver, broadcast, backfill, net);
             }
 
             // Poll metrics
@@ -455,8 +478,11 @@ mod tests {
                 let (voter, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Spawn mock net actor
+                let net = spawn_net(context.with_label("net")).await;
+
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(voter, resolver, broadcast, backfill, net);
             }
 
             // Poll metrics
@@ -538,8 +564,11 @@ mod tests {
             // Get networking
             let (voter, resolver, broadcast, backfill) = registrations.remove(&public_key).unwrap();
 
+            // Spawn mock net actor
+            let net = spawn_net(context.with_label("net")).await;
+
             // Start engine
-            engine.start(voter, resolver, broadcast, backfill);
+            engine.start(voter, resolver, broadcast, backfill, net);
 
             // Poll metrics
             loop {
@@ -673,8 +702,10 @@ mod tests {
                         let (voter, resolver, broadcast, backfill) =
                             registrations.remove(&public_key).unwrap();
 
+                        // Spawn mock net actor
+                        let net = spawn_net(context.with_label("net")).await;
                         // Start engine
-                        engine.start(voter, resolver, broadcast, backfill);
+                        engine.start(voter, resolver, broadcast, backfill, net);
                     }
 
                     // Poll metrics
@@ -818,8 +849,10 @@ mod tests {
                 let (voter, resolver, broadcast, backfill) =
                     registrations.remove(&public_key).unwrap();
 
+                // Spawn mock net actor
+                let net = spawn_net(context.with_label("net")).await;
                 // Start engine
-                engine.start(voter, resolver, broadcast, backfill);
+                engine.start(voter, resolver, broadcast, backfill, net);
             }
 
             // Poll metrics

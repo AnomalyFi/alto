@@ -1,4 +1,7 @@
-use alto_chain::{actors::mempool::{self, mempool::Mempool}, engine, Config};
+use alto_chain::{actors::{
+    mempool::{self, mempool::Mempool},
+    net
+}, engine, Config};
 use alto_client::Client;
 use alto_types::P2P_NAMESPACE;
 use axum::{routing::get, serve, Extension, Router};
@@ -8,7 +11,7 @@ use commonware_cryptography::{
     bls12381::primitives::{
         group::{self, Element},
         poly,
-    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme
+    }, ed25519::{PrivateKey, PublicKey}, sha256, Ed25519, Scheme, Sha256
 };
 use commonware_deployer::ec2::Peers;
 use commonware_p2p::authenticated;
@@ -30,6 +33,7 @@ use sysinfo::{Disks, System};
 use tracing::{error, info, Level};
 
 const SYSTEM_METRICS_REFRESH: Duration = Duration::from_secs(5);
+const RPC_PORT: u16 = 7890;
 // const METRICS_PORT: u16 = 9090;
 
 const VOTER_CHANNEL: u32 = 0;
@@ -241,9 +245,9 @@ fn main() {
 
         // Create mempool/broadcast/Proof of Availability engine
         let mempool_namespace = b"mempool";
-        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<sha256::Digest, PublicKey>::new();
+        let (mempool_application, mempool_app_mailbox) = mempool::actor::Actor::<Sha256, PublicKey>::new();
         let broadcast_coordinator = mempool::coordinator::Coordinator::new(identity.clone(), peer_keys.clone(), share);
-        let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, sha256::Digest>::new(mempool_namespace, identity_public);
+        let (_, collector_mailbox) = mempool::collector::Collector::<Ed25519, Sha256>::new(mempool_namespace, identity_public);
         let (broadcast_engine, broadcast_mailbox) = linked::Engine::new(context.with_label("broadcast_engine"), linked::Config { 
             crypto:  signer.clone(), 
             coordinator: broadcast_coordinator.clone(), 
@@ -276,8 +280,17 @@ fn main() {
 
         let broadcast_engine = broadcast_engine.start(mempool_broadcaster, mempool_ack_broadcaster);
 
+        let broadcaster_mempool_mailbox = mempool_mailbox.clone();
         let mempool_handler = mempool.start(mempool_batch_broadcaster, mempool_backfill_broadcaster, broadcast_coordinator, mempool_app_mailbox);
-        let mempool_broadcast_app_handler = context.with_label("mempool_app").spawn(|_| mempool_application.run(broadcast_mailbox, mempool_mailbox));
+        let mempool_broadcast_app_handler = context.with_label("mempool_app").spawn(|_| mempool_application.run(broadcast_mailbox, broadcaster_mempool_mailbox));
+
+        // Create net
+        let (net, net_mailbox) = net::Actor::new(context.with_label("net"), net::Config {
+            port: RPC_PORT,
+            mempool: mempool_mailbox.clone()
+        });
+
+        let net_handler = net.start();
 
         // Create engine
         let config = engine::Config {
@@ -304,7 +317,7 @@ fn main() {
         let engine = engine::Engine::new(context.with_label("engine"), config).await;
 
         // Start engine
-        let engine = engine.start(voter, resolver, broadcaster, backfiller);
+        let engine = engine.start(voter, resolver, broadcaster, backfiller, net_mailbox);
 
         // Start system metrics collector
         let system = context.with_label("system").spawn(|context| async move {
@@ -377,7 +390,7 @@ fn main() {
         });
 
         // Wait for any task to error
-        if let Err(e) = try_join_all(vec![p2p, engine, broadcast_engine, system, metrics, mempool_handler, mempool_broadcast_app_handler]).await {
+        if let Err(e) = try_join_all(vec![p2p, engine, broadcast_engine, system, metrics, mempool_handler, mempool_broadcast_app_handler, net_handler]).await {
             error!(?e, "task failed");
         }
     });

@@ -1,23 +1,77 @@
 //! Common types used throughout `alto`.
 
 mod block;
+mod batch;
+
 pub use block::{Block, Finalized, Notarized};
+pub use batch::Batch;
+use commonware_cryptography::{Ed25519, Scheme};
+use commonware_utils::SystemTimeExt;
+use std::time::SystemTime;
 mod consensus;
 pub use consensus::{leader_index, Finalization, Kind, Notarization, Nullification, Seed};
+pub mod account;
+pub mod address;
+pub mod null_error;
+pub mod signed_tx;
+pub mod state_view;
+pub mod tx;
+pub mod units;
+pub mod wallet;
 pub mod wasm;
+
+use rand::rngs::OsRng;
+use crate::address::Address;
 
 // We don't use functions here to guard against silent changes.
 pub const NAMESPACE: &[u8] = b"_ALTO";
+pub const TX_NAMESPACE: &[u8] = b"_tx_namespace_";
 pub const P2P_NAMESPACE: &[u8] = b"_ALTO_P2P";
 pub const SEED_NAMESPACE: &[u8] = b"_ALTO_SEED";
 pub const NOTARIZE_NAMESPACE: &[u8] = b"_ALTO_NOTARIZE";
 pub const NULLIFY_NAMESPACE: &[u8] = b"_ALTO_NULLIFY";
 pub const FINALIZE_NAMESPACE: &[u8] = b"_ALTO_FINALIZE";
 
+const ADDRESSLEN: usize = 32;
+
+type PublicKey = commonware_cryptography::ed25519::PublicKey;
+type PrivateKey = commonware_cryptography::ed25519::PrivateKey;
+type Signature = commonware_cryptography::ed25519::Signature;
+
+
+pub fn create_test_keypair() -> (PublicKey, PrivateKey) {
+    let mut rng = OsRng;
+    // generates keypair using random number generator
+    let keypair = Ed25519::new(&mut rng);
+
+    let public_key = keypair.public_key();
+    let private_key = keypair.private_key();
+
+    (public_key, private_key)
+}
+
+// pub fn empty_pub_key() -> PublicKey {
+//     PublicKey::try_from(&[0; 33]).unwrap()
+// }
+
+// pub fn curr_timestamp() -> u64 {
+//     SystemTime::now().epoch_millis()
+// }
+
+// pub fn empty_signature() -> Signature {
+//     Signature::try_from("").unwrap()
+// }
+
+// pub fn random_signature() -> Signature {
+//     let addr = Address::create_random_address();
+//     Signature::try_from(addr).unwrap()
+// }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use commonware_cryptography::{hash, Bls12381, Scheme};
+    use commonware_utils::SizedSerialize;
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -117,7 +171,7 @@ mod tests {
         let parent_digest = hash(&[0; 32]);
         let height = 0;
         let timestamp = 1;
-        let block = Block::new(parent_digest, height, timestamp);
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
         let block_digest = block.digest();
 
         // Check block serialization
@@ -127,6 +181,7 @@ mod tests {
         assert_eq!(block.parent, deserialized.parent);
         assert_eq!(block.height, deserialized.height);
         assert_eq!(block.timestamp, deserialized.timestamp);
+        // @todo add deserialization checks for signed transactions.
 
         // Create notarization
         let view = 0;
@@ -168,7 +223,7 @@ mod tests {
         let parent_digest = hash(&[0; 32]);
         let height = 0;
         let timestamp = 1;
-        let block = Block::new(parent_digest, height, timestamp);
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
 
         // Create notarization
         let view = 0;
@@ -205,5 +260,35 @@ mod tests {
         // Check finalization serialization with no public key
         let result = Finalization::deserialize(None, &serialized);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_block_residue() {
+        // Create network key
+        let mut rng = StdRng::seed_from_u64(0);
+        // Create block
+        let parent_digest = hash(&[0; 32]);
+        let height = 0;
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
+        let mut payload = block.serialize();
+        payload.push(10);
+
+        let block_recover = Block::deserialize(&payload);
+        assert!(block_recover.is_none());
+    }
+
+    #[test]
+    fn test_block_below_serialize_len() {
+        // Create block
+        let parent_digest = hash(&[0; 32]);
+        let height = 0;
+        let timestamp = 1;
+        let block = Block::new(parent_digest, height, timestamp, Vec::new(), [0; 32].into());
+        let mut payload = block.serialize();
+        payload.push(10);
+
+        let block_recover = Block::deserialize(&payload[0..Block::SERIALIZED_LEN-1]);
+        assert!(block_recover.is_none());
     }
 }

@@ -11,19 +11,20 @@ pub mod archive;
 mod tests {
     use core::panic;
     use std::{collections::{BTreeMap, HashMap}, num::NonZeroU32, sync::{Arc, Mutex}, time::Duration};
+    use alto_types::{signed_tx::SignedTx, tx::Tx};
     use bytes::Bytes;
     use commonware_broadcast::linked::{Config, Engine};
     
     use governor::Quota;
     use tracing::{debug, info, warn};
 
-    use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Scheme};
+    use commonware_cryptography::{bls12381::{dkg, primitives::{group::Share, poly}}, ed25519::PublicKey, sha256, Ed25519, Scheme, Sha256};
     use commonware_macros::test_traced;
     use commonware_p2p::simulated::{Oracle, Receiver, Sender, Link, Network};
     use commonware_runtime::{deterministic::{Context, Executor}, Clock, Metrics, Runner, Spawner};
     use futures::channel::mpsc;
 
-    use super::{ingress, mempool::{self, Mempool, RawTransaction}};
+    use super::{ingress, mempool::{self, Mempool}};
 
     type Registrations<P> = HashMap<P, (
         (Sender<P>, Receiver<P>), 
@@ -142,10 +143,10 @@ mod tests {
         pks: &[PublicKey],
         validators: &[(PublicKey, Ed25519, Share)],
         registrations: &mut Registrations<PublicKey>,
-        collectors: &mut BTreeMap<PublicKey, super::collector::Mailbox<Ed25519, sha256::Digest>>,
+        collectors: &mut BTreeMap<PublicKey, super::collector::Mailbox<Ed25519, Sha256>>,
         refresh_epoch_timeout: Duration,
         rebroadcast_timeout: Duration,
-    ) -> BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>> {
+    ) -> BTreeMap<PublicKey, mempool::Mailbox<Sha256>> {
         let mut mailboxes = BTreeMap::new();
         let namespace = b"my testing namespace";
         for (validator, scheme, share) in validators.iter() {
@@ -170,11 +171,11 @@ mod tests {
             coordinator.set_view(111);
 
             let (app, app_mailbox) =
-                super::actor::Actor::<sha256::Digest, PublicKey>::new();
+                super::actor::Actor::<Sha256, PublicKey>::new();
 
             let collector_mempool_mailbox = mempool_mailbox.clone();
             let (collector, collector_mailbox) =
-                super::collector::Collector::<Ed25519, sha256::Digest>::new(
+                super::collector::Collector::<Ed25519, Sha256>::new(
                     namespace,
                     *poly::public(&identity),
                 );
@@ -215,9 +216,9 @@ mod tests {
         pks: &[PublicKey],
         validators: &[(PublicKey, Ed25519, Share)],
         registrations: &mut Registrations<PublicKey>,
-        app_mailbox: &mut ingress::Mailbox<sha256::Digest, PublicKey>,
+        app_mailbox: &mut ingress::Mailbox<Sha256, PublicKey>,
         // mailboxes: &mut BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>,
-    ) -> BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>> {
+    ) -> BTreeMap<PublicKey, mempool::Mailbox<Sha256>> {
         let mut mailboxes= BTreeMap::new();
         for (validator, _, share) in validators.iter() {
             let context = context.with_label(&validator.to_string());
@@ -250,7 +251,7 @@ mod tests {
 
     async fn spawn_tx_issuer_and_wait(
         context: Context,
-        mailboxes: Arc<Mutex<BTreeMap<PublicKey, mempool::Mailbox<sha256::Digest>>>>,
+        mailboxes: Arc<Mutex<BTreeMap<PublicKey, mempool::Mailbox<Sha256>>>>,
         num_txs: u32,
         wait_batch_acknowlegement: bool,
         consume_batch: bool,
@@ -259,7 +260,7 @@ mod tests {
             .clone()
             .with_label("tx issuer")
             .spawn(move |context| async move {
-                let mut mailbox_vec: Vec<mempool::Mailbox<sha256::Digest>> = {
+                let mut mailbox_vec: Vec<mempool::Mailbox<Sha256>> = {
                     let guard = mailboxes.lock().unwrap();
                     guard.values().cloned().collect()
                 };
@@ -276,9 +277,9 @@ mod tests {
                 // issue tx to the first validator
                 let mut digests = Vec::new();
                 for i in 0..num_txs {
-                    let tx = RawTransaction::new(Bytes::from(format!("tx-{}", i)));
-                    let submission_res = mailbox.issue_tx(tx.clone()).await;
-                    if !submission_res {
+                    let tx = SignedTx::random();
+                    let submission_res = mailbox.submit_txs(vec![tx.clone()]).await;
+                    if !submission_res[0] {
                         warn!(?tx.digest, "failed to submit tx");
                         continue;
                     }
@@ -339,7 +340,7 @@ mod tests {
                 context.with_label("simulation"), 
                 num_validators, 
                 &mut shares_vec).await;
-            let mut collectors = BTreeMap::<PublicKey, super::collector::Mailbox<Ed25519, sha256::Digest>>::new();
+            let mut collectors = BTreeMap::<PublicKey, super::collector::Mailbox<Ed25519, Sha256>>::new();
             let mailboxes = spawn_validator_engines(
                 context.with_label("validator"), 
                 identity.clone(), 

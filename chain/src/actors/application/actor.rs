@@ -3,10 +3,10 @@ use super::{
     supervisor::Supervisor,
     Config,
 };
-use crate::actors::syncer;
+use crate::actors::{net, syncer};
 use alto_types::{Block, Finalization, Notarization, Seed};
 use commonware_consensus::threshold_simplex::Prover;
-use commonware_cryptography::{sha256::Digest, Hasher, Sha256};
+use commonware_cryptography::{hash, sha256::{self, Digest}, Hasher, Sha256};
 use commonware_macros::select;
 use commonware_runtime::{Clock, Handle, Metrics, Spawner};
 use commonware_utils::SystemTimeExt;
@@ -85,10 +85,11 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
         // Compute genesis digest
         self.hasher.update(GENESIS);
         let genesis_parent = self.hasher.finalize();
-        let genesis = Block::new(genesis_parent, 0, 0);
+        let genesis = Block::new(genesis_parent, 0, 0, vec![], sha256::hash(&[0; 32]));
         let genesis_digest = genesis.digest();
         let built: Option<Block> = None;
         let built = Arc::new(Mutex::new(built));
+
         while let Some(message) = self.mailbox.next().await {
             match message {
                 Message::Genesis { response } => {
@@ -124,7 +125,7 @@ impl<R: Rng + Spawner + Metrics + Clock> Actor<R> {
                                     if current <= parent.timestamp {
                                         current = parent.timestamp + 1;
                                     }
-                                    let block = Block::new(parent.digest(), parent.height+1, current);
+                                    let block = Block::new(parent.digest(), parent.height+1, current, vec![], sha256::hash(&[0; 32]));
                                     let digest = block.digest();
                                     {
                                         let mut built = built.lock().unwrap();

@@ -1,4 +1,4 @@
-use std::{collections::{HashMap}, time::{Duration, SystemTime}};
+use std::{collections::HashMap, hash::Hash, time::{Duration, SystemTime}};
 
 use bytes::{BufMut, Bytes};
 use commonware_cryptography::{ed25519::PublicKey, sha256, Digest, Hasher, Sha256};
@@ -17,175 +17,56 @@ use rand::Rng;
 use tracing::{debug, warn, info};
 use governor::clock::Clock as GClock;
 use super::{handler::{Handler, self}, key::{self, MultiIndex, Value}, ingress, coordinator::Coordinator, archive::Wrapped};
-use crate::maybe_delay_between;
+use crate::{actors::net, maybe_delay_between};
+use alto_types::{signed_tx::SignedTx, tx::Tx, Batch};
 
-#[derive(Clone, Debug)]
-pub struct Batch<D: Digest>  {
-    pub timestamp: SystemTime,
-    pub txs: Vec<RawTransaction<D>>,
-    pub digest: D,
-}
-
-impl<D: Digest> Batch<D> 
-    where Sha256: Hasher<Digest = D>
-{
-    fn compute_digest(txs: &Vec<RawTransaction<D>>) -> D {
-        let mut hasher = Sha256::new();
-
-        for tx in txs.into_iter() {
-            hasher.update(tx.raw.as_ref());
-        }
-
-        hasher.finalize()
-    }
-
-    pub fn new(txs: Vec<RawTransaction<D>>, timestamp: SystemTime) -> Self {
-        let digest = Self::compute_digest(&txs);
-
-        Self {
-            txs,
-            digest,
-            timestamp 
-        }
-    }
-
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.put_u64(self.timestamp.epoch_millis());
-        bytes.put_u64(self.txs.len() as u64);
-        for tx in self.txs.iter() {
-            bytes.put_u64(tx.size());
-            bytes.extend_from_slice(&tx.raw);
-        }
-        bytes
-    }
-
-    pub fn deserialize(mut bytes: &[u8]) -> Option<Self> {
-        use bytes::Buf;
-        // We expect at least 18 bytes for the header
-        if bytes.remaining() < 18 {
-            return None;
-        }
-        let timestamp = bytes.get_u64();
-        let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(timestamp);
-
-        let tx_count = bytes.get_u64();
-        let mut txs = Vec::with_capacity(tx_count as usize);
-        for _ in 0..tx_count {
-            // For each transaction, first read the size (u64).
-            if bytes.remaining() < 8 {
-                return None;
-            }
-            let tx_size = bytes.get_u64() as usize;
-            // Ensure there are enough bytes left.
-            if bytes.remaining() < tx_size {
-                return None;
-            }
-            // Extract tx_size bytes.
-            let tx_bytes = bytes.copy_to_bytes(tx_size);
-            txs.push(RawTransaction::new(tx_bytes));
-        }
-        // Compute the digest from the transactions.
-        let digest = Self::compute_digest(&txs);
-        // Since serialize did not include accepted and timestamp, we set accepted to false
-        // and set timestamp to the current time.
-        Some(Self {
-            timestamp,
-            txs,
-            digest,
-        })
-    }
-
-    pub fn contain_tx(&self, digest: &D) -> bool {
-        self.txs.iter().any(|tx| &tx.digest == digest) 
-    }
-
-    pub fn tx(&self, digest: &D) -> Option<RawTransaction<D>> {
-        self.txs.iter().find(|tx| &tx.digest == digest).cloned()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RawTransaction<D: Digest> {
-    pub raw: Bytes,
-
-    pub digest: D
-}
-
-impl<D: Digest> RawTransaction<D> 
-    where Sha256: Hasher<Digest = D>
-{
-    fn compute_digest(raw: &Bytes) -> D {
-        let mut hasher = Sha256::new();
-        hasher.update(&raw);
-        hasher.finalize()
-    }
-
-    pub fn new(raw: Bytes) -> Self {
-        let digest = Self::compute_digest(&raw);
-        Self {
-            raw,
-            digest
-        }
-    }
-
-    pub fn validate(&self) -> bool {
-        // TODO: implement validate here
-        true
-    }
-
-    pub fn size(&self) -> u64 {
-        self.raw.len() as u64
-    }
-}
-
-pub enum Message<D: Digest> {
+pub enum Message<H: Hasher> {
     // mark batch as accepted by the netowrk through the broadcast protocol
     BatchAcknowledged {
-        digest: D,
+        digest: H::Digest,
         response: oneshot::Sender<bool>
     },
     // from rpc or websocket
-    SubmitTx {
-        payload: RawTransaction<D>,
-        response: oneshot::Sender<bool>
+    SubmitTxs {
+        payload: Vec<SignedTx<H>>,
+        response: oneshot::Sender<Vec<bool>>
     },
     BatchConsumed {
-        digests: Vec<D>,
+        digests: Vec<H::Digest>,
         block_number: u64,
         response: oneshot::Sender<bool>,
     },
     // proposer consume batches to produce a block
     ConsumeBatches {
-        response: oneshot::Sender<Vec<Batch<D>>>
+        response: oneshot::Sender<Vec<Batch<H>>>
     },
     GetTx {
-        digest: D,
-        response: oneshot::Sender<Option<RawTransaction<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<SignedTx<H>>>
     },
     GetBatch {
-        digest: D,
-        response: oneshot::Sender<Option<Batch<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<Batch<H>>>
     },
     GetBatchContainTx {
-        digest: D,
-        response: oneshot::Sender<Option<Batch<D>>>
+        digest: H::Digest,
+        response: oneshot::Sender<Option<Batch<H>>>
     }
 }
 
 #[derive(Clone)]
-pub struct Mailbox<D: Digest> {
-    sender: mpsc::Sender<Message<D>>
+pub struct Mailbox<H: Hasher> {
+    sender: mpsc::Sender<Message<H>>
 }
 
-impl<D: Digest> Mailbox<D> {
-    pub fn new(sender: mpsc::Sender<Message<D>>) -> Self {
+impl<H: Hasher> Mailbox<H> {
+    pub fn new(sender: mpsc::Sender<Message<H>>) -> Self {
         Self {
             sender
         }
     }
 
-    pub async fn acknowledge_batch(&mut self, digest: D) -> bool {
+    pub async fn acknowledge_batch(&mut self, digest: H::Digest) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::BatchAcknowledged { digest, response})
@@ -195,17 +76,17 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batch acknowledge")
     }
 
-    pub async fn issue_tx(&mut self, tx: RawTransaction<D>) -> bool {
+    pub async fn submit_txs(&mut self, payload: Vec<SignedTx<H>>) -> Vec<bool> {
         let (response, receiver) = oneshot::channel();
         self.sender
-            .send(Message::SubmitTx { payload: tx, response })
+            .send(Message::SubmitTxs { payload, response })
             .await
             .expect("failed to issue tx");
 
         receiver.await.expect("failed to receive tx issue status")
     }
 
-    pub async fn consume_batches(&mut self) -> Vec<Batch<D>> {
+    pub async fn consume_batches(&mut self) -> Vec<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::ConsumeBatches { response })
@@ -215,7 +96,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batches")
     }
 
-    pub async fn consumed_batches(&mut self, digests: Vec<D>, block_number: u64) -> bool {
+    pub async fn consumed_batches(&mut self, digests: Vec<H::Digest>, block_number: u64) -> bool {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::BatchConsumed { digests, block_number, response })
@@ -225,7 +106,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to mark batches as consumed")
     }
 
-    pub async fn get_tx(&mut self, digest: D) -> Option<RawTransaction<D>> {
+    pub async fn get_tx(&mut self, digest: H::Digest) -> Option<SignedTx<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetTx { digest, response })
@@ -235,7 +116,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive tx")
     }
 
-    pub async fn get_batch(&mut self, digest: D) -> Option<Batch<D>> {
+    pub async fn get_batch(&mut self, digest: H::Digest) -> Option<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatch { digest, response })
@@ -245,7 +126,7 @@ impl<D: Digest> Mailbox<D> {
         receiver.await.expect("failed to receive batch")
     }
 
-    pub async fn get_batch_contain_tx(&mut self, digest: D) -> Option<Batch<D>> {
+    pub async fn get_batch_contain_tx(&mut self, digest: H::Digest) -> Option<Batch<H>> {
         let (response, receiver) = oneshot::channel();
         self.sender
             .send(Message::GetBatchContainTx { digest, response })
@@ -269,24 +150,24 @@ pub struct Config {
 pub struct Mempool<
     B: Blob,
     R: Rng + Clock + GClock + Spawner + Metrics + Storage<B>, 
-    D: Digest + Into<sha256::Digest> + From<sha256::Digest>
+    H: Hasher
 > {
     context: R,
 
     public_key: PublicKey,
 
 
-    batches: HashMap<D, Batch<D>>,
+    batches: HashMap<H::Digest, Batch<H>>,
     
-    acknowledged: Vec<D>,
+    acknowledged: Vec<H::Digest>,
 
     //TODO: replace the following two
-    accepted: Archive<TwoCap, D, B, R>,
-    consumed: Archive<TwoCap, D, B, R>,
+    accepted: Archive<TwoCap, H::Digest, B, R>,
+    consumed: Archive<TwoCap, H::Digest, B, R>,
 
-    txs: Vec<RawTransaction<D>>,
+    txs: Vec<SignedTx<H>>,
 
-    mailbox: mpsc::Receiver<Message<D>>,
+    mailbox: mpsc::Receiver<Message<H>>,
     mailbox_size: usize,
 
     block_height_seen: u64,
@@ -299,12 +180,9 @@ pub struct Mempool<
 impl<
     B: Blob,
     R: Rng + Clock + GClock + Spawner + Metrics + Storage<B>, 
-    D: Digest + Into<sha256::Digest> + From<sha256::Digest>
-> Mempool<B, R, D> 
-    where 
-        Sha256: Hasher<Digest = D>,
-{
-    pub async fn init(context: R, cfg: Config) -> (Self, Mailbox<D>) {
+    H: Hasher,
+> Mempool<B, R, H> {
+    pub async fn init(context: R, cfg: Config) -> (Self, Mailbox<H>) {
         let accepted_journal = Journal::init(
             context.with_label("accepted_journal"), 
             journal::variable::Config {
@@ -378,7 +256,7 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ), 
         coordinator: Coordinator<PublicKey>,
-        app_mailbox: ingress::Mailbox<D, PublicKey>
+        app_mailbox: ingress::Mailbox<H, PublicKey>
     ) -> Handle<()> {
         self.context.spawn_ref()(self.run(batch_network, backfill_network, coordinator, app_mailbox))
     }
@@ -394,10 +272,10 @@ impl<
             impl Receiver<PublicKey = PublicKey>,
         ), 
         coordinator: Coordinator<PublicKey>,
-        mut app_mailbox: ingress::Mailbox<D, PublicKey>
+        mut app_mailbox: ingress::Mailbox<H, PublicKey>
     ) {
         let (handler_sender, mut handler_receiver) = mpsc::channel(self.mailbox_size);
-        let handler = Handler::new(handler_sender);
+        let handler = Handler::<H>::new(handler_sender);
         let (resolver_engine, mut resolver) = p2p::Engine::new(
             self.context.with_label("resolver"),
             p2p::Config {
@@ -418,7 +296,7 @@ impl<
         );
         resolver_engine.start(backfill_network);
 
-        let mut waiters: HashMap<D, Vec<oneshot::Sender<Option<Batch<D>>>>> = HashMap::new();
+        let mut waiters: HashMap<H::Digest, Vec<oneshot::Sender<Option<Batch<H>>>>> = HashMap::new();
         let mut propose_timeout = self.context.current() + self.batch_propose_interval;
         let accepted = Wrapped::new(self.accepted);
         let consumed = Wrapped::new(self.consumed);
@@ -436,14 +314,19 @@ impl<
                         return;
                     };
                     match message {
-                        Message::SubmitTx { payload, response } => {
-                            if !payload.validate() {
-                                let _ = response.send(false);
-                                return;    
-                            }
+                        Message::SubmitTxs { payload, response } => {
+                            // TODO: add timestamp verification here
 
-                            self.txs.push(payload);
-                            let _ = response.send(true);
+                            let mut result = Vec::with_capacity(payload.len());
+                            for tx in payload.into_iter() {
+                                if !tx.validate() {
+                                    result.push(false);
+                                    continue
+                                }
+                                self.txs.push(tx);
+                                result.push(true);
+                            }
+                            let _ = response.send(result);
                         },
                         // batch ackowledged by the network 
                         Message::BatchAcknowledged { digest, response } => {
@@ -474,7 +357,7 @@ impl<
                             // update the seen height
                             self.block_height_seen = block_number;
 
-                            let consumed_keys: Vec<D> = self.batches.iter()
+                            let consumed_keys: Vec<H::Digest> = self.batches.iter()
                                 .filter_map(|(digest, batch)| {
                                     if digests.contains(&batch.digest) {
                                         Some(digest.clone())
@@ -491,7 +374,7 @@ impl<
                             }
 
                             // remove digests and batches
-                            let consumed_batches: Vec<Batch<D>> = consumed_keys.into_iter()
+                            let consumed_batches: Vec<Batch<H>> = consumed_keys.into_iter()
                                 .filter_map(|key| self.batches.remove(&key))
                                 .collect();
 
@@ -553,7 +436,7 @@ impl<
                     let mut size = 0;
                     let mut txs_cnt = 0;
                     for tx in self.txs.iter() {
-                        size += tx.size();
+                        size += tx.size() as u64;
                         txs_cnt += 1;
 
                         if size > self.batch_size_limit {
@@ -581,7 +464,7 @@ impl<
                 },
                 batch_message = batch_network.1.recv() => {
                     let (sender, message) = batch_message.expect("Batch broadcast closed");
-                    let Some(batch) = Batch::deserialize(&message) else {
+                    let Ok(batch) = Batch::deserialize(&message) else {
                         warn!(?sender, "failed to deserialize batch");
                         continue;
                     };
@@ -597,18 +480,19 @@ impl<
                         handler::Message::Produce { key, response } => {
                             match key.to_value() {
                                 key::Value::Digest(digest) => {
-                                    if let Some(batch) = self.batches.get(&D::from(digest)).cloned() {
+                                    if let Some(batch) = self.batches.get(&digest).cloned() {
                                         let _ = response.send(batch.serialize().into());
                                         continue;
                                     };
 
-                                    let consumed = consumed.get(Identifier::Key(&D::from(digest)))
-                                        .await 
-                                        .expect("Failed to get accepted batch");
-                                    if let Some(consumed) = consumed {
-                                        let _ = response.send(consumed);
-                                        continue;
-                                    }
+                                    // TODO: replace with new key-value db
+                                    // let consumed = consumed.get(Identifier::Key(&H::Digest::from(digest)))
+                                    //     .await 
+                                    //     .expect("Failed to get accepted batch");
+                                    // if let Some(consumed) = consumed {
+                                    //     let _ = response.send(consumed);
+                                    //     continue;
+                                    // }
                                     debug!(?digest, "missing batch");
                                 }
                             }         
@@ -617,7 +501,7 @@ impl<
                             match key.to_value() {
                                 key::Value::Digest(digest) => {
                                     let batch = Batch::deserialize(&value).expect("Failed to deserialize batch");
-                                    if batch.digest.into() != digest {
+                                    if batch.digest != digest {
                                         let _ = response.send(false);
                                         continue;
                                     }

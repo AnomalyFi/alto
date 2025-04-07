@@ -1,5 +1,6 @@
 use super::key::MultiIndex;
 use bytes::Bytes;
+use commonware_cryptography::{Digest, Hasher};
 use commonware_resolver::{p2p::Producer, Consumer};
 use futures::{
     channel::{mpsc, oneshot},
@@ -7,32 +8,32 @@ use futures::{
 };
 use tracing::warn;
 
-pub enum Message {
+pub enum Message<H: Hasher> {
     Deliver {
-        key: MultiIndex,
+        key: MultiIndex<H::Digest>,
         value: Bytes,
         response: oneshot::Sender<bool>,
     },
     Produce {
-        key: MultiIndex,
+        key: MultiIndex<H::Digest>,
         response: oneshot::Sender<Bytes>,
     },
 }
 
 /// Mailbox for resolver
 #[derive(Clone)]
-pub struct Handler {
-    sender: mpsc::Sender<Message>,
+pub struct Handler<H: Hasher> {
+    sender: mpsc::Sender<Message<H>>,
 }
 
-impl Handler {
-    pub(super) fn new(sender: mpsc::Sender<Message>) -> Self {
+impl<H: Hasher> Handler<H> {
+    pub(super) fn new(sender: mpsc::Sender<Message<H>>) -> Self {
         Self { sender }
     }
 }
 
-impl Consumer for Handler {
-    type Key = MultiIndex;
+impl<H: Hasher> Consumer for Handler<H> {
+    type Key = MultiIndex<H::Digest>;
     type Value = Bytes;
     type Failure = ();
 
@@ -54,8 +55,8 @@ impl Consumer for Handler {
     }
 }
 
-impl Producer for Handler {
-    type Key = MultiIndex;
+impl<H: Hasher> Producer for Handler<H> {
+    type Key = MultiIndex<H::Digest>;
 
     async fn produce(&mut self, key: Self::Key) -> oneshot::Receiver<Bytes> {
         let (response, receiver) = oneshot::channel();

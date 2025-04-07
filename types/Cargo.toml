@@ -1,6 +1,6 @@
 [package]
 name = "alto-types"
-version = "0.0.6"
+version = "0.0.4"
 publish = true
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -16,12 +16,14 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 commonware-cryptography = { workspace = true }
 commonware-utils = { workspace = true }
+commonware-codec = { workspace = true}
 bytes =  { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 wasm-bindgen = "0.2.100"
 serde = { version = "1.0.219", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+more-asserts = "0.3.1"
 
 # Enable "js" feature when WASM is target
 [target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]

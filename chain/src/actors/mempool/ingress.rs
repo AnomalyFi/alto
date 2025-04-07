@@ -1,5 +1,7 @@
+use std::hash::Hash;
+
 use commonware_utils::Array;
-use commonware_cryptography::Digest;
+use commonware_cryptography::{Digest, Hasher};
 use commonware_broadcast::{linked::Context, Application as A};
 use futures::{ channel::{mpsc, oneshot}, SinkExt};
 
@@ -8,31 +10,31 @@ pub struct Payload {
     data: Vec<u8>
 }
 
-pub enum Message<D: Digest, P: Array> {
-    Broadcast(D),
-    Verify(Context<P>, D, oneshot::Sender<bool>),
+pub enum Message<H: Hasher, P: Array> {
+    Broadcast(H::Digest),
+    Verify(Context<P>, H::Digest, oneshot::Sender<bool>),
 }
 
 #[derive(Clone)]
-pub struct Mailbox<D: Digest, P: Array> {
-    sender: mpsc::Sender<Message<D, P>>,
+pub struct Mailbox<H: Hasher, P: Array> {
+    sender: mpsc::Sender<Message<H, P>>,
 }
 
-impl<D: Digest, P: Array> Mailbox<D, P> {
-    pub(super) fn new(sender: mpsc::Sender<Message<D, P>>) -> Self {
+impl<H: Hasher, P: Array> Mailbox<H, P> {
+    pub(super) fn new(sender: mpsc::Sender<Message<H, P>>) -> Self {
         Self {
             sender
         }
     }
 
-    pub async fn broadcast(&mut self, payload: D) {
+    pub async fn broadcast(&mut self, payload: H::Digest) {
         let _ = self.sender.send(Message::Broadcast(payload)).await;
     }
 }
 
-impl<D: Digest, P: Array> A for Mailbox<D, P> {
+impl<H: Hasher, P: Array> A for Mailbox<H, P> {
     type Context = Context<P>;
-    type Digest = D;
+    type Digest = H::Digest;
 
     async fn verify(
         &mut self,

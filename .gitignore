@@ -4,5 +4,7 @@
 *.vscode
 /chain/assets
 /types/pkg
+/storage/rocksdb
+.idea
 
 targets
